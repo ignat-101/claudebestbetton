@@ -1,0 +1,55 @@
+services:
+  # Flask API (TMA backend)
+  - type: web
+    name: flashbet-api
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: ADMIN_TG_IDS
+        sync: false
+      - key: TMA_URL
+        sync: false
+      - key: FLASK_ENV
+        value: production
+    healthCheckPath: /api/health
+    autoDeploy: true
+
+  # Telegram Bot (polling)
+  - type: worker
+    name: flashbet-bot
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot.py
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: ADMIN_TG_IDS
+        sync: false
+      - key: TMA_URL
+        sync: false
+
+  # TMA Frontend (static)
+  - type: web
+    name: flashbet-tma
+    runtime: static
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
+    envVars:
+      - key: VITE_API_URL
+        sync: false
+    headers:
+      - path: /*
+        name: X-Frame-Options
+        value: ALLOW-FROM https://telegram.org
+      - path: /*
+        name: Content-Security-Policy
+        value: "default-src 'self' 'unsafe-inline' 'unsafe-eval' https: data: blob:; frame-ancestors https://telegram.org https://web.telegram.org"
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
