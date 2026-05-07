@@ -244,14 +244,8 @@ body {
   color: #34d399;
 }
 
-/* Stars icon */
-.stars-icon {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  color: #fbbf24;
-  font-weight: 600;
-}
+/* TON icon color */
+.ton-color { color: #0098EA; }
 
 /* Scrollable content */
 .scroll-content {
@@ -297,30 +291,26 @@ input[type="range"]::-webkit-slider-thumb {
   border-color: rgba(139, 92, 246, 0.5);
   color: #c4b5fd;
 }
-.chip:active { transform: scale(0.95); }
 
-/* Modal backdrop */
-.modal-backdrop {
-  background: rgba(0, 0, 0, 0.7);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-}
-
-/* Number morph */
-.number-display {
-  font-variant-numeric: tabular-nums;
-  font-feature-settings: "tnum";
-}
-
-/* Liquid blob background decorations */
+/* Blob */
 .blob {
   position: absolute;
   border-radius: 50%;
-  filter: blur(60px);
-  pointer-events: none;
+  filter: blur(80px);
   opacity: 0.15;
+  pointer-events: none;
 }
 
-/* Safe area for TMA */
-.safe-top { padding-top: env(safe-area-inset-top); }
-.safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+/* TON Connect button override */
+[data-tc-button] {
+  background: rgba(0,152,234,0.15) !important;
+  border: 1px solid rgba(0,152,234,0.4) !important;
+  border-radius: 12px !important;
+  color: #0098EA !important;
+  font-family: inherit !important;
+}
+
+/* Safe area bottom */
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}

@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { TonConnectUIProvider, useTonAddress } from '@tonconnect/ui-react';
 import { useStore } from './store/useStore';
 import { BetsList } from './components/BetsList';
 import { BetDetail } from './components/BetDetail';
@@ -6,12 +7,14 @@ import { CreateBet } from './components/CreateBet';
 import { Portfolio } from './components/Portfolio';
 import { AdminPanel } from './components/AdminPanel';
 import { Profile } from './components/Profile';
+import { CryptoPriceTicker } from './components/CryptoPriceTicker';
 
-// Tab icons as SVG components for crispness
+const MANIFEST_URL = `${window.location.origin}/tonconnect-manifest.json`;
+
 const Icons = {
   bets: (active: boolean) => (
     <svg viewBox="0 0 24 24" fill="none" className="w-6 h-6" stroke={active ? '#a78bfa' : 'rgba(255,255,255,0.35)'} strokeWidth={2}>
-      <path d="M3 3h18v18H3z" rx={2} strokeLinejoin="round" />
+      <rect x="3" y="3" width="18" height="18" rx="2" strokeLinejoin="round" />
       <path d="M3 9h18M9 21V9" />
     </svg>
   ),
@@ -55,52 +58,39 @@ const TABS: TabItem[] = [
   { key: 'profile', label: 'Профиль' },
 ];
 
-export default function App() {
-  const { activeTab, setActiveTab, selectedBetId, currentUser, setCurrentUser } = useStore();
+function AppInner() {
+  const { activeTab, setActiveTab, selectedBetId, currentUser, setCurrentUser, setTonWalletAddress, bets } = useStore();
+  const tonAddress = useTonAddress();
 
   useEffect(() => {
     // Initialize Telegram WebApp
-    const tg = (window as unknown as { Telegram?: { WebApp?: {
-      ready: () => void;
-      expand: () => void;
-      setHeaderColor: (color: string) => void;
-      setBackgroundColor: (color: string) => void;
-      disableVerticalSwipes?: () => void;
-      enableClosingConfirmation?: () => void;
-      initDataUnsafe?: {
-        user?: {
-          id: number;
-          username?: string;
-          first_name: string;
-          last_name?: string;
-        };
-      };
-    } } }).Telegram;
+    const tg = (window as any).Telegram?.WebApp;
+    if (tg) {
+      tg.ready();
+      tg.expand();
+      tg.setHeaderColor?.('#050510');
+      tg.setBackgroundColor?.('#050510');
+      tg.disableVerticalSwipes?.();
 
-    if (tg?.WebApp) {
-      const webApp = tg.WebApp;
-      webApp.ready();
-      webApp.expand();
-      webApp.setHeaderColor('#050510');
-      webApp.setBackgroundColor('#050510');
-      webApp.disableVerticalSwipes?.();
-      webApp.enableClosingConfirmation?.();
-
-      // Load user data from Telegram
-      const tgUser = webApp.initDataUnsafe?.user;
+      const tgUser = tg.initDataUnsafe?.user;
       if (tgUser) {
         setCurrentUser({
           ...currentUser,
           telegramId: tgUser.id,
           username: tgUser.username || `user_${tgUser.id}`,
-          firstName: tgUser.first_name,
+          firstName: tgUser.first_name || 'User',
           lastName: tgUser.last_name,
-          // Admin check - add your Telegram ID here
+          // Set admin by Telegram ID — replace with your real ID
           isAdmin: tgUser.id === 123456789 || currentUser.isAdmin,
         });
       }
     }
   }, []);
+
+  // Sync TON wallet address to store
+  useEffect(() => {
+    setTonWalletAddress(tonAddress || null);
+  }, [tonAddress]);
 
   const visibleTabs = TABS.filter((t) => !t.adminOnly || currentUser.isAdmin);
 
@@ -113,9 +103,11 @@ export default function App() {
         <div className="blob w-48 h-48 bg-cyan-600 animate-float" style={{ top: '40%', left: '60%', animationDelay: '3s' }} />
       </div>
 
+      {/* Crypto ticker */}
+      <CryptoPriceTicker />
+
       {/* Main content */}
       <div className="flex-1 relative overflow-hidden">
-        {/* Tab panels */}
         <div className={`absolute inset-0 transition-all duration-200 ${activeTab === 'bets' ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'}`}>
           <BetsList />
         </div>
@@ -146,7 +138,7 @@ export default function App() {
           {visibleTabs.map((tab) => {
             const isActive = activeTab === tab.key;
             const pendingCount = tab.key === 'admin'
-              ? useStore.getState().bets.filter((b) => b.status === 'pending').length
+              ? bets.filter((b) => b.status === 'pending').length
               : 0;
 
             return (
@@ -156,24 +148,15 @@ export default function App() {
                 className="flex-1 flex flex-col items-center justify-center gap-1 relative"
                 style={{ height: '68px' }}
               >
-                {/* Active indicator */}
                 {isActive && (
                   <div className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-0.5 rounded-full bg-gradient-to-r from-purple-500 to-blue-500" />
                 )}
-
-                {/* Icon */}
                 <div className={`transition-transform duration-200 ${isActive ? 'scale-110' : 'scale-100'}`}>
                   {Icons[tab.key](isActive)}
                 </div>
-
-                {/* Label */}
-                <span className={`text-[10px] font-semibold transition-colors duration-200 ${
-                  isActive ? 'text-purple-300' : 'text-white/30'
-                }`}>
+                <span className={`text-[10px] font-semibold transition-colors duration-200 ${isActive ? 'text-purple-300' : 'text-white/30'}`}>
                   {tab.label}
                 </span>
-
-                {/* Badge */}
                 {pendingCount > 0 && (
                   <span className="absolute top-2 right-1/4 bg-red-500 text-white text-[8px] font-black w-4 h-4 rounded-full flex items-center justify-center">
                     {pendingCount}
@@ -185,5 +168,13 @@ export default function App() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <TonConnectUIProvider manifestUrl={MANIFEST_URL}>
+      <AppInner />
+    </TonConnectUIProvider>
   );
 }

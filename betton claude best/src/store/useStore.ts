@@ -11,10 +11,11 @@ export interface UserBet {
   userId: string;
   username: string;
   side: 'yes' | 'no';
-  amount: number;
+  amount: number; // in TON (real)
   shares: number;
   timestamp: number;
   avgPrice: number;
+  txHash?: string; // real TON tx hash
 }
 
 export interface Vote {
@@ -55,9 +56,9 @@ export interface Bet {
   resolveAt: number;
   status: BetStatus;
   outcome: BetOutcome;
-  yesPool: number;
-  noPool: number;
-  totalVolume: number;
+  yesPool: number; // in TON
+  noPool: number;  // in TON
+  totalVolume: number; // in TON
   yesPrice: number;
   noPrice: number;
   participants: UserBet[];
@@ -72,6 +73,8 @@ export interface Bet {
   featured: boolean;
   tags: string[];
   feePercent: number;
+  // TON treasury wallet where bets are sent
+  treasuryWallet: string;
 }
 
 export interface User {
@@ -81,10 +84,9 @@ export interface User {
   firstName: string;
   lastName?: string;
   avatar: string;
-  starsBalance: number;
-  tonBalance: number;
-  totalWagered: number;
-  totalWon: number;
+  tonBalance: number; // display only - real balance from wallet
+  totalWagered: number; // in TON
+  totalWon: number; // in TON
   totalLost: number;
   reputation: number;
   activeBets: string[];
@@ -113,57 +115,14 @@ export interface Transaction {
   id: string;
   userId: string;
   type: 'bet' | 'win' | 'refund' | 'fee' | 'referral' | 'vote_reward' | 'deposit' | 'withdrawal';
-  amount: number;
+  amount: number; // in TON
   betId?: string;
   timestamp: number;
   description: string;
+  txHash?: string;
 }
 
-export interface Treasury {
-  totalBalance: number;
-  totalFees: number;
-  totalPaidOut: number;
-  walletAddress: string;
-  transactions: Transaction[];
-}
-
-interface AppState {
-  activeTab: 'bets' | 'create' | 'portfolio' | 'admin' | 'profile';
-  setActiveTab: (tab: 'bets' | 'create' | 'portfolio' | 'admin' | 'profile') => void;
-  selectedBetId: string | null;
-  setSelectedBetId: (id: string | null) => void;
-  currentUser: User;
-  setCurrentUser: (user: User) => void;
-  updateUserBalance: (delta: number) => void;
-  bets: Bet[];
-  addBet: (bet: Bet) => void;
-  updateBet: (id: string, updates: Partial<Bet>) => void;
-  placeBet: (betId: string, side: 'yes' | 'no', amount: number) => boolean;
-  resolveBet: (betId: string, outcome: 'yes' | 'no') => void;
-  approveBet: (betId: string) => void;
-  rejectBet: (betId: string) => void;
-  voteOnBet: (betId: string, choice: VoteChoice) => void;
-  addComment: (betId: string, text: string) => void;
-  treasury: Treasury;
-  transactions: Transaction[];
-  addTransaction: (tx: Transaction) => void;
-  cryptoPrices: Record<string, { price: number; change24h: number; symbol: string }>;
-  setCryptoPrices: (prices: Record<string, { price: number; change24h: number; symbol: string }>) => void;
-  filterCategory: BetCategory | 'all';
-  setFilterCategory: (cat: BetCategory | 'all') => void;
-  searchQuery: string;
-  setSearchQuery: (q: string) => void;
-  tonWalletAddress: string | null;
-  setTonWalletAddress: (addr: string | null) => void;
-}
-
-function calculateShares(poolIn: number, poolOut: number, amountIn: number): number {
-  if (poolIn === 0 || poolOut === 0) return amountIn;
-  const k = poolIn * poolOut;
-  const newPoolIn = poolIn + amountIn;
-  const newPoolOut = k / newPoolIn;
-  return poolOut - newPoolOut;
-}
+const TREASURY_WALLET = 'UQCfdyrb0Fj8lA32OfizTwGY829tTzihsEYl1FrpBzeVKdi0';
 
 function calcPrice(yesPool: number, noPool: number) {
   const total = yesPool + noPool;
@@ -174,12 +133,20 @@ function calcPrice(yesPool: number, noPool: number) {
   };
 }
 
+function calculateShares(poolIn: number, poolOut: number, amountIn: number): number {
+  if (poolIn === 0 || poolOut === 0) return amountIn;
+  const k = poolIn * poolOut;
+  const newPoolIn = poolIn + amountIn;
+  const newPoolOut = k / newPoolIn;
+  return poolOut - newPoolOut;
+}
+
 const genHistory = (len: number, baseYes: number) =>
   Array.from({ length: len }, (_, i) => ({
     time: Date.now() - (len - 1 - i) * 3600000,
     yesPrice: Math.min(0.95, Math.max(0.05, baseYes + Math.sin(i * 0.5) * 0.08 + (i / len) * 0.1 - 0.05)),
     noPrice: Math.min(0.95, Math.max(0.05, (1 - baseYes) - Math.sin(i * 0.5) * 0.08 - (i / len) * 0.1 + 0.05)),
-    volume: Math.floor(Math.random() * 500) + 50,
+    volume: Math.floor(Math.random() * 50) + 5,
   }));
 
 const DEMO_BETS: Bet[] = [
@@ -194,9 +161,9 @@ const DEMO_BETS: Bet[] = [
     resolveAt: Date.now() + 86400000 * 15,
     status: 'active',
     outcome: null,
-    yesPool: 8500,
-    noPool: 3200,
-    totalVolume: 11700,
+    yesPool: 85.5,
+    noPool: 32.0,
+    totalVolume: 117.5,
     yesPrice: 0.27,
     noPrice: 0.73,
     participants: [],
@@ -214,6 +181,7 @@ const DEMO_BETS: Bet[] = [
     featured: true,
     tags: ['BTC', 'Bitcoin', 'Bull Run'],
     feePercent: 5,
+    treasuryWallet: TREASURY_WALLET,
   },
   {
     id: 'bet_002',
@@ -226,9 +194,9 @@ const DEMO_BETS: Bet[] = [
     resolveAt: Date.now() + 86400000 * 60,
     status: 'active',
     outcome: null,
-    yesPool: 5200,
-    noPool: 7800,
-    totalVolume: 13000,
+    yesPool: 52.0,
+    noPool: 78.0,
+    totalVolume: 130.0,
     yesPrice: 0.6,
     noPrice: 0.4,
     participants: [],
@@ -240,6 +208,7 @@ const DEMO_BETS: Bet[] = [
     featured: true,
     tags: ['ETH', 'Ethereum', 'DeFi'],
     feePercent: 5,
+    treasuryWallet: TREASURY_WALLET,
   },
   {
     id: 'bet_003',
@@ -252,9 +221,9 @@ const DEMO_BETS: Bet[] = [
     resolveAt: Date.now() + 86400000 * 30,
     status: 'active',
     outcome: null,
-    yesPool: 12000,
-    noPool: 8000,
-    totalVolume: 20000,
+    yesPool: 120.0,
+    noPool: 80.0,
+    totalVolume: 200.0,
     yesPrice: 0.4,
     noPrice: 0.6,
     participants: [],
@@ -266,6 +235,7 @@ const DEMO_BETS: Bet[] = [
     featured: false,
     tags: ['Хоккей', 'Спорт', 'Россия'],
     feePercent: 5,
+    treasuryWallet: TREASURY_WALLET,
   },
   {
     id: 'bet_004',
@@ -278,9 +248,9 @@ const DEMO_BETS: Bet[] = [
     resolveAt: Date.now() + 86400000 * 90,
     status: 'active',
     outcome: null,
-    yesPool: 6800,
-    noPool: 4200,
-    totalVolume: 11000,
+    yesPool: 68.0,
+    noPool: 42.0,
+    totalVolume: 110.0,
     yesPrice: 0.38,
     noPrice: 0.62,
     participants: [],
@@ -293,64 +263,10 @@ const DEMO_BETS: Bet[] = [
     featured: true,
     tags: ['TON', 'Telegram', 'Top5'],
     feePercent: 5,
+    treasuryWallet: TREASURY_WALLET,
   },
   {
     id: 'bet_005',
-    title: 'Дождь в Москве в ближайшую пятницу?',
-    description: 'Выпадут ли осадки в Москве (>0.1мм) в ближайшую пятницу согласно данным OpenWeatherMap.',
-    category: 'weather',
-    creatorId: 'user_weather',
-    creatorUsername: 'Meteorolog',
-    createdAt: Date.now() - 43200000,
-    resolveAt: Date.now() + 86400000 * 3,
-    status: 'active',
-    outcome: null,
-    yesPool: 1200,
-    noPool: 1800,
-    totalVolume: 3000,
-    yesPrice: 0.6,
-    noPrice: 0.4,
-    participants: [],
-    votes: [],
-    comments: [],
-    priceHistory: genHistory(12, 0.6),
-    oracleType: 'vote',
-    adminApproved: true,
-    featured: false,
-    tags: ['Погода', 'Москва'],
-    feePercent: 5,
-  },
-  {
-    id: 'bet_006',
-    title: 'SOL/USDT пробьет $300 на этой неделе?',
-    description: 'Solana достигнет цены $300 против USDT на любой крупной бирже до воскресенья 23:59 UTC.',
-    category: 'crypto',
-    creatorId: 'user_sol',
-    creatorUsername: 'SolanaTrader',
-    createdAt: Date.now() - 3600000,
-    resolveAt: Date.now() + 86400000 * 7,
-    status: 'pending',
-    outcome: null,
-    yesPool: 500,
-    noPool: 500,
-    totalVolume: 1000,
-    yesPrice: 0.5,
-    noPrice: 0.5,
-    participants: [],
-    votes: [],
-    comments: [],
-    priceHistory: [],
-    oracleType: 'price',
-    oracleSymbol: 'solana',
-    oracleTarget: 300,
-    oracleDirection: 'above',
-    adminApproved: false,
-    featured: false,
-    tags: ['SOL', 'Solana'],
-    feePercent: 5,
-  },
-  {
-    id: 'bet_007',
     title: 'Trump подпишет биткоин-резервный закон до сентября 2025?',
     description: 'Президент США Дональд Трамп официально подпишет закон о стратегическом биткоин-резерве США до 1 сентября 2025.',
     category: 'politics',
@@ -360,9 +276,9 @@ const DEMO_BETS: Bet[] = [
     resolveAt: Date.now() + 86400000 * 45,
     status: 'active',
     outcome: null,
-    yesPool: 9200,
-    noPool: 6800,
-    totalVolume: 16000,
+    yesPool: 92.0,
+    noPool: 68.0,
+    totalVolume: 160.0,
     yesPrice: 0.42,
     noPrice: 0.58,
     participants: [],
@@ -374,52 +290,76 @@ const DEMO_BETS: Bet[] = [
     featured: true,
     tags: ['Политика', 'Bitcoin', 'США'],
     feePercent: 5,
+    treasuryWallet: TREASURY_WALLET,
   },
 ];
 
 const DEFAULT_USER: User = {
   id: 'user_me',
-  telegramId: 123456789,
-  username: 'FlashBetUser',
-  firstName: 'Crypto',
-  lastName: 'Trader',
+  telegramId: 0,
+  username: 'Player',
+  firstName: 'TON',
+  lastName: 'Bettor',
   avatar: '🎯',
-  starsBalance: 5000,
-  tonBalance: 12.5,
-  totalWagered: 3200,
-  totalWon: 4100,
-  totalLost: 2800,
-  reputation: 847,
+  tonBalance: 0,
+  totalWagered: 0,
+  totalWon: 0,
+  totalLost: 0,
+  reputation: 100,
   activeBets: [],
   resolvedBets: [],
   votedBets: [],
   referralCode: 'FLASH_X7K2M',
-  referrals: ['user_a', 'user_b', 'user_c'],
-  referralEarnings: 450,
-  joinedAt: Date.now() - 86400000 * 30,
+  referrals: [],
+  referralEarnings: 0,
+  joinedAt: Date.now(),
   lastActive: Date.now(),
-  isAdmin: true,
-  notifications: [
-    { id: 'n1', type: 'win', title: '🎉 Вы выиграли!', message: 'Ставка на Bitcoin +450 ⭐', timestamp: Date.now() - 3600000, read: false },
-    { id: 'n2', type: 'vote_reward', title: '🗳️ Награда за голосование', message: 'Правильный голос! +120 ⭐', timestamp: Date.now() - 7200000, read: false },
-    { id: 'n3', type: 'referral', title: '👥 Новый реферал', message: 'SolanaKing присоединился! +50 ⭐', timestamp: Date.now() - 86400000, read: true },
-  ],
+  isAdmin: false,
+  notifications: [],
 };
 
-const DEFAULT_TREASURY: Treasury = {
-  totalBalance: 142580,
-  totalFees: 8943,
-  totalPaidOut: 98420,
-  walletAddress: 'UQCfdyrb0Fj8lA32OfizTwGY829tTzihsEYl1FrpBzeVKdi0',
-  transactions: Array.from({ length: 12 }, (_, i) => ({
-    id: `tx_${i}`,
-    userId: 'system',
-    type: (['bet', 'win', 'fee', 'refund'] as const)[i % 4],
-    amount: Math.floor(Math.random() * 1000) + 50,
-    timestamp: Date.now() - i * 3600000 * 2,
-    description: ['Ставка создана', 'Выплата победителю', 'Комиссия платформы', 'Возврат ставки'][i % 4],
-  })),
-};
+interface AppState {
+  activeTab: 'bets' | 'create' | 'portfolio' | 'admin' | 'profile';
+  setActiveTab: (tab: 'bets' | 'create' | 'portfolio' | 'admin' | 'profile') => void;
+
+  selectedBetId: string | null;
+  setSelectedBetId: (id: string | null) => void;
+
+  currentUser: User;
+  setCurrentUser: (user: User) => void;
+
+  bets: Bet[];
+  addBet: (bet: Bet) => void;
+  updateBet: (id: string, updates: Partial<Bet>) => void;
+
+  // placeBet now just records the bet client-side after on-chain tx confirmed
+  recordBet: (betId: string, side: 'yes' | 'no', amount: number, txHash: string) => void;
+  resolveBet: (betId: string, outcome: 'yes' | 'no') => void;
+  approveBet: (betId: string) => void;
+  rejectBet: (betId: string) => void;
+  voteOnBet: (betId: string, choice: VoteChoice) => void;
+  addComment: (betId: string, text: string) => void;
+
+  transactions: Transaction[];
+  addTransaction: (tx: Transaction) => void;
+
+  cryptoPrices: Record<string, { usd: number; usd_24h_change?: number }>;
+  setCryptoPrices: (prices: Record<string, { usd: number; usd_24h_change?: number }>) => void;
+
+  filterCategory: BetCategory | 'all';
+  setFilterCategory: (cat: BetCategory | 'all') => void;
+
+  searchQuery: string;
+  setSearchQuery: (q: string) => void;
+
+  tonWalletAddress: string | null;
+  setTonWalletAddress: (addr: string | null) => void;
+
+  pendingTxBetId: string | null;
+  pendingTxSide: 'yes' | 'no' | null;
+  pendingTxAmount: number;
+  setPendingTx: (betId: string | null, side: 'yes' | 'no' | null, amount: number) => void;
+}
 
 export const useStore = create<AppState>()(
   persist(
@@ -432,37 +372,26 @@ export const useStore = create<AppState>()(
 
       currentUser: DEFAULT_USER,
       setCurrentUser: (user) => set({ currentUser: user }),
-      updateUserBalance: (delta) =>
-        set((s) => ({
-          currentUser: { ...s.currentUser, starsBalance: Math.max(0, s.currentUser.starsBalance + delta) },
-        })),
 
       bets: DEMO_BETS,
       addBet: (bet) => set((s) => ({ bets: [bet, ...s.bets] })),
       updateBet: (id, updates) =>
-        set((s) => ({ bets: s.bets.map((b) => (b.id === id ? { ...b, ...updates } : b)) })),
+        set((s) => ({
+          bets: s.bets.map((b) => (b.id === id ? { ...b, ...updates } : b)),
+        })),
 
-      placeBet: (betId, side, amount) => {
+      recordBet: (betId, side, amount, txHash) => {
         const { bets, currentUser } = get();
         const bet = bets.find((b) => b.id === betId);
-        if (!bet || bet.status !== 'active' || !bet.adminApproved) return false;
-        if (currentUser.starsBalance < amount) return false;
+        if (!bet) return;
 
-        const fee = Math.floor(amount * (bet.feePercent / 100));
-        const net = amount - fee;
-
-        let newYes = bet.yesPool;
-        let newNo = bet.noPool;
-        let shares: number;
-
-        if (side === 'yes') {
-          shares = calculateShares(bet.yesPool, bet.noPool, net);
-          newYes += net;
-        } else {
-          shares = calculateShares(bet.noPool, bet.yesPool, net);
-          newNo += net;
-        }
-
+        const newYes = side === 'yes' ? bet.yesPool + amount : bet.yesPool;
+        const newNo = side === 'no' ? bet.noPool + amount : bet.noPool;
+        const shares = calculateShares(
+          side === 'yes' ? bet.yesPool : bet.noPool,
+          side === 'yes' ? bet.noPool : bet.yesPool,
+          amount
+        );
         const { yesPrice, noPrice } = calcPrice(newYes, newNo);
 
         const userBet: UserBet = {
@@ -474,16 +403,18 @@ export const useStore = create<AppState>()(
           shares,
           timestamp: Date.now(),
           avgPrice: side === 'yes' ? yesPrice : noPrice,
+          txHash,
         };
 
         const tx: Transaction = {
           id: `tx_${Date.now()}`,
           userId: currentUser.id,
           type: 'bet',
-          amount: -amount,
+          amount,
           betId,
           timestamp: Date.now(),
-          description: `Ставка ${side === 'yes' ? 'ДА' : 'НЕТ'} — "${bet.title}"`,
+          description: `Ставка ${side === 'yes' ? 'ДА' : 'НЕТ'} на "${bet.title}"`,
+          txHash,
         };
 
         set((s) => ({
@@ -506,18 +437,22 @@ export const useStore = create<AppState>()(
           ),
           currentUser: {
             ...s.currentUser,
-            starsBalance: s.currentUser.starsBalance - amount,
             totalWagered: s.currentUser.totalWagered + amount,
             activeBets: [...new Set([...s.currentUser.activeBets, betId])],
-          },
-          treasury: {
-            ...s.treasury,
-            totalBalance: s.treasury.totalBalance + fee,
-            totalFees: s.treasury.totalFees + fee,
+            notifications: [
+              {
+                id: `n_${Date.now()}`,
+                type: 'system',
+                title: '✅ Ставка принята!',
+                message: `${amount} TON на ${side === 'yes' ? 'ДА' : 'НЕТ'} — tx: ${txHash.slice(0, 8)}...`,
+                timestamp: Date.now(),
+                read: false,
+              },
+              ...s.currentUser.notifications,
+            ],
           },
           transactions: [tx, ...s.transactions],
         }));
-        return true;
       },
 
       resolveBet: (betId, outcome) => {
@@ -528,48 +463,55 @@ export const useStore = create<AppState>()(
         const winners = bet.participants.filter((p) => p.side === outcome);
         const totalShares = winners.reduce((sum, p) => sum + p.shares, 0);
         const totalPool = bet.yesPool + bet.noPool;
-        const fee = Math.floor(totalPool * 0.05);
+        const fee = totalPool * 0.05;
         const prize = totalPool - fee;
-
         const myWin = winners.find((w) => w.userId === currentUser.id);
-        const myReward = myWin && totalShares > 0 ? Math.floor((myWin.shares / totalShares) * prize) : 0;
+        const myReward = myWin && totalShares > 0 ? (myWin.shares / totalShares) * prize : 0;
 
-        const txs: Transaction[] = winners.map((w) => ({
-          id: `tx_win_${w.userId}_${Date.now()}`,
-          userId: w.userId,
-          type: 'win' as const,
-          amount: totalShares > 0 ? Math.floor((w.shares / totalShares) * prize) : 0,
-          betId,
-          timestamp: Date.now(),
-          description: `Выигрыш: "${bet.title}"`,
-        }));
+        const notification: AppNotification = myReward > 0
+          ? {
+              id: `n_${Date.now()}`,
+              type: 'win',
+              title: '🎉 Вы выиграли!',
+              message: `+${myReward.toFixed(3)} TON — "${bet.title}"`,
+              timestamp: Date.now(),
+              read: false,
+            }
+          : {
+              id: `n_${Date.now()}`,
+              type: 'loss',
+              title: '😔 Ставка проиграла',
+              message: `"${bet.title}"`,
+              timestamp: Date.now(),
+              read: false,
+            };
 
         set((s) => ({
-          bets: s.bets.map((b) => (b.id === betId ? { ...b, status: 'resolved', outcome } : b)),
+          bets: s.bets.map((b) =>
+            b.id === betId ? { ...b, status: 'resolved', outcome } : b
+          ),
           currentUser: {
             ...s.currentUser,
-            starsBalance: s.currentUser.starsBalance + myReward,
             totalWon: s.currentUser.totalWon + myReward,
             resolvedBets: [...s.currentUser.resolvedBets, betId],
             activeBets: s.currentUser.activeBets.filter((id) => id !== betId),
+            notifications: [notification, ...s.currentUser.notifications],
           },
-          treasury: {
-            ...s.treasury,
-            totalFees: s.treasury.totalFees + fee,
-            totalPaidOut: s.treasury.totalPaidOut + prize,
-          },
-          transactions: [...txs, ...s.transactions],
         }));
       },
 
       approveBet: (betId) =>
         set((s) => ({
-          bets: s.bets.map((b) => (b.id === betId ? { ...b, adminApproved: true, status: 'active' } : b)),
+          bets: s.bets.map((b) =>
+            b.id === betId ? { ...b, adminApproved: true, status: 'active' } : b
+          ),
         })),
 
       rejectBet: (betId) =>
         set((s) => ({
-          bets: s.bets.map((b) => (b.id === betId ? { ...b, status: 'cancelled' } : b)),
+          bets: s.bets.map((b) =>
+            b.id === betId ? { ...b, status: 'cancelled' } : b
+          ),
         })),
 
       voteOnBet: (betId, choice) => {
@@ -584,8 +526,13 @@ export const useStore = create<AppState>()(
           timestamp: Date.now(),
         };
         set((s) => ({
-          bets: s.bets.map((b) => (b.id === betId ? { ...b, votes: [...b.votes, vote] } : b)),
-          currentUser: { ...s.currentUser, votedBets: [...s.currentUser.votedBets, betId] },
+          bets: s.bets.map((b) =>
+            b.id === betId ? { ...b, votes: [...b.votes, vote] } : b
+          ),
+          currentUser: {
+            ...s.currentUser,
+            votedBets: [...s.currentUser.votedBets, betId],
+          },
         }));
       },
 
@@ -601,27 +548,36 @@ export const useStore = create<AppState>()(
           likes: 0,
         };
         set((s) => ({
-          bets: s.bets.map((b) => (b.id === betId ? { ...b, comments: [...b.comments, comment] } : b)),
+          bets: s.bets.map((b) =>
+            b.id === betId ? { ...b, comments: [...b.comments, comment] } : b
+          ),
         }));
       },
 
-      treasury: DEFAULT_TREASURY,
       transactions: [],
-      addTransaction: (tx) => set((s) => ({ transactions: [tx, ...s.transactions] })),
+      addTransaction: (tx) =>
+        set((s) => ({ transactions: [tx, ...s.transactions] })),
 
       cryptoPrices: {},
       setCryptoPrices: (prices) => set({ cryptoPrices: prices }),
 
       filterCategory: 'all',
       setFilterCategory: (cat) => set({ filterCategory: cat }),
+
       searchQuery: '',
       setSearchQuery: (q) => set({ searchQuery: q }),
 
       tonWalletAddress: null,
       setTonWalletAddress: (addr) => set({ tonWalletAddress: addr }),
+
+      pendingTxBetId: null,
+      pendingTxSide: null,
+      pendingTxAmount: 0,
+      setPendingTx: (betId, side, amount) =>
+        set({ pendingTxBetId: betId, pendingTxSide: side, pendingTxAmount: amount }),
     }),
     {
-      name: 'flashbet-store-v2',
+      name: 'flashbet-ton-v3',
       partialize: (state) => ({
         currentUser: state.currentUser,
         bets: state.bets,
@@ -631,3 +587,5 @@ export const useStore = create<AppState>()(
     }
   )
 );
+
+export const TREASURY_WALLET_ADDRESS = TREASURY_WALLET;
