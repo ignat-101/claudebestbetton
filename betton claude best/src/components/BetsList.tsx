@@ -14,8 +14,8 @@ const CATEGORIES: { key: BetCategory | 'all'; label: string; icon: string }[] = 
 ];
 
 export function BetsList() {
-  const { bets, filterCategory, setFilterCategory, searchQuery, setSearchQuery, setSelectedBetId } = useStore();
-  const [sortBy, setSortBy] = useState<'volume' | 'newest' | 'ending'>('volume');
+  const { bets, filterCategory, setFilterCategory, searchQuery, setSearchQuery, setSelectedBetId, currentUser } = useStore();
+  const [sortBy, setSortBy] = useState<'volume' | 'newest' | 'ending'>('newest');
 
   const activeBets = bets.filter((b) => b.adminApproved && b.status === 'active');
 
@@ -40,7 +40,7 @@ export function BetsList() {
         <div className="flex items-center justify-between mb-2">
           <div>
             <h1 className="text-lg font-black text-white">⚡ FlashBet</h1>
-            <p className="text-[11px] text-white/40">{filtered.length} активных ставок • TON</p>
+            <p className="text-[11px] text-white/40">{filtered.length} активных ставок • Реальный TON</p>
           </div>
           <select
             value={sortBy}
@@ -52,6 +52,17 @@ export function BetsList() {
             <option value="newest" style={{ background: '#050510' }}>Новые</option>
             <option value="ending" style={{ background: '#050510' }}>Скоро итог</option>
           </select>
+        </div>
+
+        {/* Security notice */}
+        <div className="glass-card p-2 mb-2 border border-emerald-500/20">
+          <div className="flex items-center gap-2">
+            <span className="text-emerald-400 text-xs">🔐</span>
+            <div className="flex-1 min-w-0">
+              <span className="text-[10px] text-emerald-400 font-bold">РЕАЛЬНЫЕ СТАВКИ</span>
+              <span className="text-[10px] text-white/40 ml-2">TON блокчейн · PoS защита · Без демо-данных</span>
+            </div>
+          </div>
         </div>
 
         {/* Search */}
@@ -85,6 +96,7 @@ export function BetsList() {
           <div className="flex flex-col items-center justify-center h-48 text-white/30">
             <div className="text-4xl mb-2">🎲</div>
             <p className="text-sm">Нет активных ставок</p>
+            <p className="text-xs mt-1 text-white/20">Создайте первую реальную ставку</p>
           </div>
         ) : (
           filtered.map((bet) => {
@@ -92,6 +104,8 @@ export function BetsList() {
             const noPct = 100 - yesPct;
             const timeLeft = formatDistanceToNow(bet.resolveAt, { locale: ru, addSuffix: true });
             const volume = bet.totalVolume;
+            const userHasBet = bet.participants.some((p) => p.userId === currentUser.id);
+            const isEmpty = volume === 0;
 
             return (
               <div
@@ -106,21 +120,41 @@ export function BetsList() {
                       <span className="badge-featured text-[9px] px-1.5 py-0.5 rounded-full font-bold mr-1">⭐ ТОП</span>
                     )}
                     <span className="badge-active text-[9px] px-1.5 py-0.5 rounded-full font-bold">LIVE</span>
+                    {userHasBet && (
+                      <span className="ml-1 text-[9px] px-1.5 py-0.5 rounded-full font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30">Ваша ставка</span>
+                    )}
                     <h3 className="text-sm font-bold text-white mt-1.5 leading-tight line-clamp-2">{bet.title}</h3>
                   </div>
                   <div className="flex-shrink-0 text-right">
-                    <div className="text-xs font-bold text-white">{volume.toFixed(1)}</div>
-                    <div className="text-[9px] text-white/40 flex items-center gap-0.5 justify-end">
-                      <span className="text-[#0098EA]">💎</span>TON
-                    </div>
+                    {isEmpty ? (
+                      <div>
+                        <div className="text-xs font-bold text-white/30">0.000</div>
+                        <div className="text-[9px] text-white/20">Новая ставка</div>
+                      </div>
+                    ) : (
+                      <div>
+                        <div className="text-xs font-bold text-white">{volume.toFixed(3)}</div>
+                        <div className="text-[9px] text-white/40 flex items-center gap-0.5 justify-end">
+                          <span className="text-[#0098EA]">💎</span>TON
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
 
                 {/* Price bar */}
-                <div className="flex rounded-lg overflow-hidden mb-2 h-2">
-                  <div className="yes-bar transition-all duration-500" style={{ width: `${yesPct}%` }} />
-                  <div className="no-bar transition-all duration-500" style={{ width: `${noPct}%` }} />
-                </div>
+                {!isEmpty ? (
+                  <div className="flex rounded-lg overflow-hidden mb-2 h-2">
+                    <div className="yes-bar transition-all duration-500" style={{ width: `${yesPct}%` }} />
+                    <div className="no-bar transition-all duration-500" style={{ width: `${noPct}%` }} />
+                  </div>
+                ) : (
+                  <div className="flex rounded-lg overflow-hidden mb-2 h-2 bg-white/5">
+                    <div className="flex-1 flex items-center justify-center">
+                      <span className="text-[8px] text-white/20">Ждём первую ставку</span>
+                    </div>
+                  </div>
+                )}
 
                 {/* Odds */}
                 <div className="flex justify-between items-center mb-2">
@@ -140,6 +174,12 @@ export function BetsList() {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-1.5">
                     <span className="text-[10px] text-white/30">👥 {bet.participants.length} участников</span>
+                    {bet.oracleType === 'price' && (
+                      <span className="text-[9px] text-blue-400/60">📊 Авто-оракул</span>
+                    )}
+                    {bet.oracleType === 'vote' && (
+                      <span className="text-[9px] text-purple-400/60">🗳 PoS</span>
+                    )}
                   </div>
                   <span className="text-[10px] text-white/30">⏱ {timeLeft}</span>
                 </div>

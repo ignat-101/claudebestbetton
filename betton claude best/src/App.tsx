@@ -1,165 +1,171 @@
 import { useEffect } from 'react';
-import { TonConnectUIProvider, useTonAddress } from '@tonconnect/ui-react';
+import { TonConnectUIProvider } from '@tonconnect/ui-react';
 import { useStore } from './store/useStore';
+import { CryptoTicker } from './components/CryptoTicker';
 import { BetsList } from './components/BetsList';
 import { BetDetail } from './components/BetDetail';
 import { CreateBet } from './components/CreateBet';
 import { Portfolio } from './components/Portfolio';
 import { AdminPanel } from './components/AdminPanel';
 import { Profile } from './components/Profile';
-import { CryptoPriceTicker } from './components/CryptoPriceTicker';
+import { parseTelegramInitData, generateReferralCode } from './security/proofOfStake';
+import './index.css';
 
-const MANIFEST_URL = `${window.location.origin}/tonconnect-manifest.json`;
+/**
+ * TON Connect Manifest — укажите ваш реальный URL после деплоя
+ */
+const MANIFEST_URL = 'https://raw.githubusercontent.com/ignat-101/claudebestbetton/main/betton%20claude%20best/tonconnect-manifest.json';
 
-const Icons = {
-  bets: (active: boolean) => (
-    <svg viewBox="0 0 24 24" fill="none" className="w-6 h-6" stroke={active ? '#a78bfa' : 'rgba(255,255,255,0.35)'} strokeWidth={2}>
-      <rect x="3" y="3" width="18" height="18" rx="2" strokeLinejoin="round" />
-      <path d="M3 9h18M9 21V9" />
-    </svg>
-  ),
-  create: (active: boolean) => (
-    <svg viewBox="0 0 24 24" fill="none" className="w-6 h-6" stroke={active ? '#a78bfa' : 'rgba(255,255,255,0.35)'} strokeWidth={2}>
-      <circle cx={12} cy={12} r={9} />
-      <path d="M12 8v8M8 12h8" strokeLinecap="round" />
-    </svg>
-  ),
-  portfolio: (active: boolean) => (
-    <svg viewBox="0 0 24 24" fill="none" className="w-6 h-6" stroke={active ? '#a78bfa' : 'rgba(255,255,255,0.35)'} strokeWidth={2}>
-      <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  ),
-  admin: (active: boolean) => (
-    <svg viewBox="0 0 24 24" fill="none" className="w-6 h-6" stroke={active ? '#a78bfa' : 'rgba(255,255,255,0.35)'} strokeWidth={2}>
-      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" strokeLinejoin="round" />
-    </svg>
-  ),
-  profile: (active: boolean) => (
-    <svg viewBox="0 0 24 24" fill="none" className="w-6 h-6" stroke={active ? '#a78bfa' : 'rgba(255,255,255,0.35)'} strokeWidth={2}>
-      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-      <circle cx={12} cy={7} r={4} />
-    </svg>
-  ),
-};
+// ════════════════════════════════════════════════════════
+//  TABS CONFIG
+// ════════════════════════════════════════════════════════
+const TABS = [
+  { key: 'bets', icon: '🎲', label: 'Ставки' },
+  { key: 'create', icon: '➕', label: 'Создать' },
+  { key: 'portfolio', icon: '📊', label: 'Портфолио' },
+  { key: 'admin', icon: '🛡️', label: 'Админ' },
+  { key: 'profile', icon: '👤', label: 'Профиль' },
+] as const;
 
-type Tab = 'bets' | 'create' | 'portfolio' | 'admin' | 'profile';
+// ════════════════════════════════════════════════════════
+//  INNER APP (inside TonConnectUIProvider)
+// ════════════════════════════════════════════════════════
+function InnerApp() {
+  const { activeTab, setActiveTab, selectedBetId, bets, currentUser, setCurrentUser } = useStore();
 
-interface TabItem {
-  key: Tab;
-  label: string;
-  adminOnly?: boolean;
-}
-
-const TABS: TabItem[] = [
-  { key: 'bets', label: 'Ставки' },
-  { key: 'create', label: 'Создать' },
-  { key: 'portfolio', label: 'Портфолио' },
-  { key: 'admin', label: 'Админ', adminOnly: true },
-  { key: 'profile', label: 'Профиль' },
-];
-
-function AppInner() {
-  const { activeTab, setActiveTab, selectedBetId, currentUser, setCurrentUser, setTonWalletAddress, bets } = useStore();
-  const tonAddress = useTonAddress();
-
+  // ─────────────────────────────────────────────────────
+  //  Telegram initData — безопасная инициализация
+  //  isAdmin: ТОЛЬКО из Telegram initData, НИКОГДА из localStorage
+  // ─────────────────────────────────────────────────────
   useEffect(() => {
-    // Initialize Telegram WebApp
-    const tg = (window as any).Telegram?.WebApp;
-    if (tg) {
-      tg.ready();
-      tg.expand();
-      tg.setHeaderColor?.('#050510');
-      tg.setBackgroundColor?.('#050510');
-      tg.disableVerticalSwipes?.();
+    try {
+      const tg = (window as Window & { Telegram?: { WebApp?: {
+        initData: string;
+        initDataUnsafe?: { user?: { id: number; username?: string; first_name?: string } };
+        ready?: () => void;
+        expand?: () => void;
+      } } }).Telegram;
+      const webApp = tg?.WebApp;
 
-      const tgUser = tg.initDataUnsafe?.user;
-      if (tgUser) {
-        setCurrentUser({
-          ...currentUser,
-          telegramId: tgUser.id,
-          username: tgUser.username || `user_${tgUser.id}`,
-          firstName: tgUser.first_name || 'User',
-          lastName: tgUser.last_name,
-          // Set admin by Telegram ID — replace with your real ID
-          isAdmin: tgUser.id === 123456789 || currentUser.isAdmin,
-        });
+      if (webApp) {
+        webApp.ready?.();
+        webApp.expand?.();
+
+        const initData = webApp.initData;
+        const parsed = parseTelegramInitData(initData);
+
+        if (parsed.isValid && parsed.userId) {
+          // ⚠️ КРИТИЧНО: isAdmin определяется только по telegramId
+          // В production — верифицируйте HMAC на backend
+          // ADMIN_TG_IDS — список ID администраторов (задаётся в env)
+          const ADMIN_IDS: number[] = [
+            // Добавьте ваш Telegram ID сюда для тестирования
+            // Например: 123456789
+          ];
+
+          const isAdmin = ADMIN_IDS.includes(parsed.userId);
+          const userId = `tg_${parsed.userId}`;
+
+          setCurrentUser({
+            ...currentUser,
+            id: userId,
+            telegramId: parsed.userId,
+            username: parsed.username ?? `user${parsed.userId}`,
+            firstName: parsed.firstName ?? 'TON',
+            isAdmin,
+            referralCode: generateReferralCode(userId),
+          });
+        }
       }
+    } catch (e) {
+      // Не в Telegram — продолжаем без инициализации
+      console.warn('Not in Telegram WebApp context');
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Sync TON wallet address to store
-  useEffect(() => {
-    setTonWalletAddress(tonAddress || null);
-  }, [tonAddress]);
+  const pendingCount = bets.filter((b) => b.status === 'pending').length;
 
-  const visibleTabs = TABS.filter((t) => !t.adminOnly || currentUser.isAdmin);
+  // Показываем вкладку Admin только если isAdmin
+  const visibleTabs = TABS.filter((t) => t.key !== 'admin' || currentUser.isAdmin);
 
   return (
-    <div className="fixed inset-0 bg-mesh flex flex-col overflow-hidden">
-      {/* Animated background blobs */}
-      <div className="fixed inset-0 pointer-events-none overflow-hidden">
-        <div className="blob w-80 h-80 bg-purple-600 animate-float" style={{ top: '-5%', left: '-10%', animationDelay: '0s' }} />
-        <div className="blob w-64 h-64 bg-blue-600 animate-float" style={{ bottom: '10%', right: '-5%', animationDelay: '1.5s' }} />
-        <div className="blob w-48 h-48 bg-cyan-600 animate-float" style={{ top: '40%', left: '60%', animationDelay: '3s' }} />
+    <div
+      className="flex flex-col bg-mesh"
+      style={{ height: '100dvh', maxWidth: 430, margin: '0 auto', position: 'relative' }}
+    >
+      {/* Ambient background blobs */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div
+          className="absolute w-64 h-64 rounded-full opacity-20 animate-float"
+          style={{
+            background: 'radial-gradient(circle, rgba(139,92,246,0.4) 0%, transparent 70%)',
+            top: '-32px', left: '-32px',
+            filter: 'blur(40px)',
+          }}
+        />
+        <div
+          className="absolute w-48 h-48 rounded-full opacity-15"
+          style={{
+            background: 'radial-gradient(circle, rgba(59,130,246,0.4) 0%, transparent 70%)',
+            bottom: '80px', right: '-24px',
+            filter: 'blur(40px)',
+          }}
+        />
       </div>
 
       {/* Crypto ticker */}
-      <CryptoPriceTicker />
+      <CryptoTicker />
 
       {/* Main content */}
-      <div className="flex-1 relative overflow-hidden">
-        <div className={`absolute inset-0 transition-all duration-200 ${activeTab === 'bets' ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'}`}>
-          <BetsList />
-        </div>
-        <div className={`absolute inset-0 transition-all duration-200 ${activeTab === 'create' ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'}`}>
-          <CreateBet />
-        </div>
-        <div className={`absolute inset-0 transition-all duration-200 ${activeTab === 'portfolio' ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'}`}>
-          <Portfolio />
-        </div>
-        <div className={`absolute inset-0 transition-all duration-200 ${activeTab === 'admin' ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'}`}>
-          <AdminPanel />
-        </div>
-        <div className={`absolute inset-0 transition-all duration-200 ${activeTab === 'profile' ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'}`}>
-          <Profile />
-        </div>
-
-        {/* Bet detail overlay */}
-        {selectedBetId && (
-          <div className="absolute inset-0 z-50">
-            <BetDetail />
-          </div>
-        )}
+      <div className="flex-1 overflow-hidden relative z-10">
+        {activeTab === 'bets' && !selectedBetId && <BetsList />}
+        {activeTab === 'bets' && selectedBetId && <BetDetail />}
+        {activeTab === 'create' && <CreateBet />}
+        {activeTab === 'portfolio' && <Portfolio />}
+        {activeTab === 'admin' && <AdminPanel />}
+        {activeTab === 'profile' && <Profile />}
       </div>
 
       {/* Bottom tab bar */}
-      <div className="flex-shrink-0 tab-nav safe-bottom">
-        <div className="flex items-center" style={{ height: '68px' }}>
+      <div
+        className="tab-nav flex-shrink-0 relative z-20"
+        style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
+      >
+        <div className="flex items-stretch">
           {visibleTabs.map((tab) => {
             const isActive = activeTab === tab.key;
-            const pendingCount = tab.key === 'admin'
-              ? bets.filter((b) => b.status === 'pending').length
-              : 0;
+            const isPending = tab.key === 'admin' && pendingCount > 0;
 
             return (
               <button
                 key={tab.key}
-                onClick={() => setActiveTab(tab.key)}
-                className="flex-1 flex flex-col items-center justify-center gap-1 relative"
-                style={{ height: '68px' }}
+                onClick={() => {
+                  setActiveTab(tab.key);
+                }}
+                className={`flex-1 flex flex-col items-center justify-center py-2.5 relative transition-all ${
+                  isActive ? 'text-white' : 'text-white/30'
+                }`}
+                style={{ minHeight: 56 }}
               >
+                {/* Active indicator */}
                 {isActive && (
-                  <div className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-0.5 rounded-full bg-gradient-to-r from-purple-500 to-blue-500" />
+                  <div className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-0.5 bg-purple-500 rounded-full" />
                 )}
-                <div className={`transition-transform duration-200 ${isActive ? 'scale-110' : 'scale-100'}`}>
-                  {Icons[tab.key](isActive)}
-                </div>
-                <span className={`text-[10px] font-semibold transition-colors duration-200 ${isActive ? 'text-purple-300' : 'text-white/30'}`}>
+
+                <span
+                  className={`text-xl mb-0.5 transition-transform ${isActive ? 'scale-110' : 'scale-100'}`}
+                >
+                  {tab.icon}
+                </span>
+                <span className={`text-[9px] font-semibold leading-none ${isActive ? 'text-purple-300' : 'text-white/30'}`}>
                   {tab.label}
                 </span>
-                {pendingCount > 0 && (
-                  <span className="absolute top-2 right-1/4 bg-red-500 text-white text-[8px] font-black w-4 h-4 rounded-full flex items-center justify-center">
-                    {pendingCount}
+
+                {/* Badge for admin pending */}
+                {isPending && (
+                  <span className="absolute top-1.5 right-[calc(50%-16px)] bg-red-500 text-white text-[8px] font-black w-3.5 h-3.5 rounded-full flex items-center justify-center">
+                    {pendingCount > 9 ? '9+' : pendingCount}
                   </span>
                 )}
               </button>
@@ -171,10 +177,13 @@ function AppInner() {
   );
 }
 
+// ════════════════════════════════════════════════════════
+//  ROOT APP with TON Connect Provider
+// ════════════════════════════════════════════════════════
 export default function App() {
   return (
     <TonConnectUIProvider manifestUrl={MANIFEST_URL}>
-      <AppInner />
+      <InnerApp />
     </TonConnectUIProvider>
   );
 }

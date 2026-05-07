@@ -1,47 +1,49 @@
 import { useState } from 'react';
-import { useTonConnectUI, useTonWallet } from '@tonconnect/ui-react';
 import { useStore, BetCategory, Bet, TREASURY_WALLET_ADDRESS } from '../store/useStore';
+import { SECURITY_CONFIG } from '../security/proofOfStake';
+import { useTonWallet } from '@tonconnect/ui-react';
 
 const CATEGORIES: { key: BetCategory; label: string; icon: string; desc: string }[] = [
-  { key: 'crypto', label: 'Крипто', icon: '₿', desc: 'Курсы, объемы, события' },
+  { key: 'crypto', label: 'Криптовалюта', icon: '₿', desc: 'BTC, ETH, TON, рыночные события' },
   { key: 'sports', label: 'Спорт', icon: '⚽', desc: 'Матчи, турниры, рекорды' },
-  { key: 'politics', label: 'Политика', icon: '🗳', desc: 'Выборы, законы, события' },
-  { key: 'weather', label: 'Погода', icon: '🌤', desc: 'Осадки, температура' },
-  { key: 'news', label: 'Новости', icon: '📰', desc: 'Текущие события' },
-  { key: 'custom', label: 'Личный спор', icon: '🎯', desc: 'Любое событие' },
+  { key: 'politics', label: 'Политика', icon: '🗳', desc: 'Выборы, законы, решения' },
+  { key: 'weather', label: 'Погода', icon: '🌤', desc: 'Температура, события' },
+  { key: 'news', label: 'Новости', icon: '📰', desc: 'Мировые события' },
+  { key: 'custom', label: 'Личный', icon: '🎯', desc: 'Любой вопрос' },
 ];
 
-const ORACLE_TYPES: { key: 'price' | 'vote' | 'manual'; label: string; desc: string; icon: string }[] = [
-  { key: 'price', label: 'Оракул цены', desc: 'Автоматически через CoinGecko API', icon: '🤖' },
-  { key: 'vote', label: 'Голосование', desc: 'Proof of Stake консенсус', icon: '🗳' },
-  { key: 'manual', label: 'Ручное', desc: 'Подтверждение администратором', icon: '👤' },
+const ORACLE_TYPES = [
+  {
+    key: 'price',
+    label: 'Ценовой оракул',
+    icon: '📊',
+    desc: 'Автоматическое разрешение по цене актива (CoinGecko). Нет ручного вмешательства.',
+  },
+  {
+    key: 'vote',
+    label: 'PoS голосование',
+    icon: '🗳',
+    desc: `Консенсус валидаторов. Квадратичное взвешивание. Кворум ${Math.round(SECURITY_CONFIG.QUORUM_THRESHOLD * 100)}%. Мин. ${SECURITY_CONFIG.MIN_VALIDATORS_FOR_RESOLUTION} валидаторов.`,
+  },
+  {
+    key: 'manual',
+    label: 'Ручное + PoS',
+    icon: '👤',
+    desc: 'Администратор + обязательная PoS проверка. Нельзя разрешить без кворума.',
+  },
 ];
 
 const DURATIONS = [
-  { label: '1 час', hours: 1 },
-  { label: '6 часов', hours: 6 },
-  { label: '1 день', hours: 24 },
-  { label: '3 дня', hours: 72 },
-  { label: '1 нед.', hours: 168 },
-  { label: '1 мес.', hours: 720 },
+  { label: '1 день', ms: 86400000 },
+  { label: '3 дня', ms: 3 * 86400000 },
+  { label: '1 неделя', ms: 7 * 86400000 },
+  { label: '2 недели', ms: 14 * 86400000 },
+  { label: '1 месяц', ms: 30 * 86400000 },
+  { label: '3 месяца', ms: 90 * 86400000 },
 ];
-
-const MIN_LIQUIDITY_TON = 0.1;
-
-function toNano(ton: number): string {
-  return Math.floor(ton * 1_000_000_000).toString();
-}
-
-function buildCommentPayload(text: string): string {
-  const encoded = new TextEncoder().encode(text);
-  const buf = new Uint8Array(4 + encoded.length);
-  buf.set(encoded, 4);
-  return btoa(String.fromCharCode(...buf));
-}
 
 export function CreateBet() {
   const { currentUser, addBet, setActiveTab } = useStore();
-  const [tonConnectUI] = useTonConnectUI();
   const wallet = useTonWallet();
 
   const [step, setStep] = useState(1);
@@ -49,271 +51,301 @@ export function CreateBet() {
   const [description, setDescription] = useState('');
   const [category, setCategory] = useState<BetCategory>('crypto');
   const [oracleType, setOracleType] = useState<'price' | 'vote' | 'manual'>('vote');
-  const [oracleSymbol, setOracleSymbol] = useState('');
-  const [oracleTarget, setOracleTarget] = useState('');
+  const [oracleSymbol, setOracleSymbol] = useState('bitcoin');
+  const [oracleTarget, setOracleTarget] = useState<number>(100000);
   const [oracleDirection, setOracleDirection] = useState<'above' | 'below'>('above');
-  const [durationHours, setDurationHours] = useState(24);
+  const [duration, setDuration] = useState(7 * 86400000);
   const [tags, setTags] = useState('');
-  const [initialLiquidity, setInitialLiquidity] = useState(0.5);
-  const [isTxPending, setIsTxPending] = useState(false);
-  const [txError, setTxError] = useState('');
   const [submitted, setSubmitted] = useState(false);
-
-  const CRYPTO_SYMBOLS = ['bitcoin', 'ethereum', 'the-open-network', 'solana', 'binancecoin', 'ripple', 'cardano'];
+  const [error, setError] = useState('');
 
   const canProceed = () => {
     if (step === 1) return title.length >= 10 && description.length >= 20;
-    if (step === 2) return category !== null;
-    if (step === 3) return oracleType !== null;
-    if (step === 4) return durationHours > 0 && initialLiquidity >= MIN_LIQUIDITY_TON;
+    if (step === 2) return !!category;
+    if (step === 3) return !!oracleType;
     return true;
   };
 
-  const handleSubmit = async () => {
-    setTxError('');
-    if (!wallet) {
-      tonConnectUI.openModal();
+  const handleSubmit = () => {
+    setError('');
+
+    // Санитизация входных данных
+    const cleanTitle = title.replace(/[<>]/g, '').slice(0, 120);
+    const cleanDesc = description.replace(/[<>]/g, '').slice(0, 1000);
+    const cleanTags = tags.split(',')
+      .map((t) => t.trim().replace(/[<>]/g, '').slice(0, 20))
+      .filter((t) => t.length > 0)
+      .slice(0, 5);
+
+    if (cleanTitle.length < 10) {
+      setError('Заголовок слишком короткий');
       return;
     }
 
-    setIsTxPending(true);
-    try {
-      const betId = `bet_${Date.now()}`;
-      const commentText = `CREATE_BET:${betId}:${category}:${oracleType}`;
+    const newBet: Bet = {
+      id: `bet_${Date.now()}_${currentUser.id.slice(-4)}`,
+      title: cleanTitle,
+      description: cleanDesc,
+      category,
+      creatorId: currentUser.id,
+      creatorUsername: currentUser.username,
+      createdAt: Date.now(),
+      resolveAt: Date.now() + duration,
+      status: 'pending', // ВСЕГДА pending — требует одобрения администратора
+      outcome: null,
+      // ✅ Пулы всегда 0 при создании — нет фиктивных данных
+      yesPool: 0,
+      noPool: 0,
+      totalVolume: 0,
+      yesPrice: 0.5,
+      noPrice: 0.5,
+      participants: [],
+      votes: [],
+      comments: [],
+      priceHistory: [{ time: Date.now(), yesPrice: 0.5, noPrice: 0.5, volume: 0 }],
+      oracleType,
+      oracleSymbol: oracleType === 'price' ? oracleSymbol : undefined,
+      oracleTarget: oracleType === 'price' ? oracleTarget : undefined,
+      oracleDirection: oracleType === 'price' ? oracleDirection : undefined,
+      adminApproved: false, // ОБЯЗАТЕЛЬНАЯ модерация
+      featured: false,
+      tags: cleanTags,
+      feePercent: SECURITY_CONFIG.PLATFORM_FEE_PCT * 100,
+      treasuryWallet: TREASURY_WALLET_ADDRESS,
+      minBetTon: SECURITY_CONFIG.MIN_BET_TON,
+      maxSlippagePct: 5,
+    };
 
-      const tx = {
-        validUntil: Math.floor(Date.now() / 1000) + 300,
-        messages: [
-          {
-            address: TREASURY_WALLET_ADDRESS,
-            amount: toNano(initialLiquidity),
-            payload: buildCommentPayload(commentText),
-          },
-        ],
-      };
-
-      const result = await tonConnectUI.sendTransaction(tx);
-      const txHash = result.boc ? btoa(result.boc).slice(0, 24) : `tx_${Date.now()}`;
-
-      const tagList = tags.split(',').map((t) => t.trim()).filter((t) => t.length > 0);
-
-      const newBet: Bet = {
-        id: betId,
-        title: title.trim(),
-        description: description.trim(),
-        category,
-        creatorId: currentUser.id,
-        creatorUsername: currentUser.username,
-        createdAt: Date.now(),
-        resolveAt: Date.now() + durationHours * 3600000,
-        status: 'pending',
-        outcome: null,
-        yesPool: initialLiquidity / 2,
-        noPool: initialLiquidity / 2,
-        totalVolume: initialLiquidity,
-        yesPrice: 0.5,
-        noPrice: 0.5,
-        participants: [],
-        votes: [],
-        comments: [],
-        priceHistory: [
-          { time: Date.now(), yesPrice: 0.5, noPrice: 0.5, volume: initialLiquidity },
-        ],
-        oracleType,
-        oracleSymbol: oracleType === 'price' ? oracleSymbol : undefined,
-        oracleTarget: oracleType === 'price' && oracleTarget ? Number(oracleTarget) : undefined,
-        oracleDirection: oracleType === 'price' ? oracleDirection : undefined,
-        adminApproved: false,
-        featured: false,
-        tags: tagList,
-        feePercent: 5,
-        treasuryWallet: TREASURY_WALLET_ADDRESS,
-      };
-
-      addBet(newBet);
-      setSubmitted(true);
-      console.log('Bet created with txHash:', txHash);
-    } catch (err: any) {
-      if (err?.message?.includes('Reject') || err?.message?.includes('User rejected')) {
-        setTxError('Транзакция отменена');
-      } else {
-        setTxError(err?.message || 'Ошибка транзакции');
-      }
-    } finally {
-      setIsTxPending(false);
-    }
+    addBet(newBet);
+    setSubmitted(true);
   };
 
   if (submitted) {
     return (
-      <div className="flex flex-col items-center justify-center h-full px-6 animate-fadeIn">
-        <div className="glass-card p-8 text-center max-w-sm w-full border border-emerald-500/20">
-          <div className="text-6xl mb-4 animate-float">🎉</div>
-          <h2 className="text-xl font-black text-white mb-2">Ставка создана!</h2>
-          <p className="text-sm text-white/50 mb-2">
-            Транзакция отправлена в блокчейн TON. После одобрения администратором ставка появится в общем списке.
-          </p>
-          <div className="flex items-center justify-center gap-1.5 mb-4 text-[#0098EA]">
-            <span>💎</span>
-            <span className="text-sm font-bold">{initialLiquidity} TON</span>
-            <span className="text-white/40 text-xs">внесено в пул</span>
+      <div className="flex flex-col items-center justify-center h-full px-6 text-center">
+        <div className="text-5xl mb-4 animate-float">🎉</div>
+        <h2 className="text-xl font-black text-white mb-2">Ставка создана!</h2>
+        <p className="text-sm text-white/50 mb-6">
+          Ваша ставка отправлена на модерацию. После одобрения администратором она появится в списке.
+        </p>
+        <div className="glass-card p-4 w-full mb-4 border border-yellow-500/20">
+          <div className="flex items-center gap-2 mb-2">
+            <span className="text-yellow-400">⏳</span>
+            <span className="text-xs font-bold text-yellow-300">На модерации</span>
           </div>
-          <div className="glass-card p-3 mb-6 border border-purple-500/20">
-            <ul className="text-xs text-white/50 space-y-1 text-left">
-              <li>✅ Транзакция подтверждена в TON</li>
-              <li>📢 Администратор проверит ставку</li>
-              <li>🗳 После одобрения — ставка активна</li>
-              <li>💰 Пул ликвидности создан</li>
-            </ul>
+          <div className="text-[10px] text-white/40">
+            Проверяем: точность формулировки, наличие объективных критериев разрешения, оракул.
           </div>
-          <button
-            onClick={() => { setSubmitted(false); setStep(1); setTitle(''); setDescription(''); setTags(''); setActiveTab('bets'); }}
-            className="btn-primary w-full py-3 rounded-xl text-white font-bold"
-          >
-            Смотреть ставки
-          </button>
         </div>
+        <div className="glass-card p-4 w-full mb-6 border border-blue-500/20">
+          <div className="text-[10px] font-bold text-blue-300 mb-2">🔐 Защита от манипуляций</div>
+          <div className="text-[10px] text-white/40 space-y-1">
+            <div>• Ставка ВСЕГДА начинается с пустых пулов (0 TON)</div>
+            <div>• Нет фиктивных участников и объёмов</div>
+            <div>• Разрешение только через оракул или PoS кворум</div>
+          </div>
+        </div>
+        <button
+          onClick={() => { setSubmitted(false); setStep(1); setTitle(''); setDescription(''); setActiveTab('bets'); }}
+          className="btn-primary px-8 py-3 rounded-xl text-white font-bold"
+        >
+          К списку ставок
+        </button>
       </div>
     );
   }
 
   return (
     <div className="flex flex-col h-full">
+      {/* Header */}
       <div className="flex-shrink-0 px-4 pt-4 pb-3">
-        <h1 className="text-xl font-black text-white mb-1">Создать ставку</h1>
-        <p className="text-xs text-white/40">Шаг {step} из 4 — {['Описание', 'Категория', 'Оракул', 'Параметры'][step - 1]}</p>
-        <div className="flex gap-1.5 mt-3">
+        <h1 className="text-xl font-black text-white mb-0.5">➕ Создать ставку</h1>
+        <p className="text-[11px] text-white/40 mb-3">
+          Шаг {step} из 4 — {['Описание', 'Категория', 'Оракул', 'Параметры'][step - 1]}
+        </p>
+        <div className="flex gap-1">
           {[1, 2, 3, 4].map((s) => (
-            <div key={s} className={`h-1.5 flex-1 rounded-full transition-all duration-300 ${s <= step ? 'bg-gradient-to-r from-purple-500 to-blue-500' : 'bg-white/10'}`} />
+            <div
+              key={s}
+              className={`flex-1 h-1 rounded-full transition-all ${s <= step ? 'bg-purple-500' : 'bg-white/10'}`}
+            />
           ))}
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto scroll-content px-4 pb-28 space-y-4">
-        {/* Step 1 */}
-        {step === 1 && (
-          <div className="animate-fadeIn space-y-4">
-            <div>
-              <label className="block text-xs font-semibold text-white/60 mb-2">Заголовок ставки *</label>
-              <input
-                className="glass-input w-full rounded-xl px-4 py-3 text-sm"
-                placeholder="Bitcoin достигнет $150,000 до конца 2025?"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                maxLength={120}
-              />
-              <div className="flex justify-between mt-1">
-                <span className={`text-[10px] ${title.length < 10 ? 'text-red-400/70' : 'text-emerald-400/70'}`}>
-                  {title.length < 10 ? `Мин. 10 символов (${10 - title.length} осталось)` : '✓ Отлично'}
-                </span>
-                <span className="text-[10px] text-white/30">{title.length}/120</span>
-              </div>
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-white/60 mb-2">Подробное описание *</label>
-              <textarea
-                className="glass-input w-full rounded-xl px-4 py-3 text-sm resize-none"
-                rows={5}
-                placeholder="Опишите условия ставки максимально точно..."
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                maxLength={500}
-              />
-              <span className={`text-[10px] ${description.length < 20 ? 'text-red-400/70' : 'text-emerald-400/70'}`}>
-                {description.length < 20 ? `Мин. 20 символов (${20 - description.length} осталось)` : '✓ Отлично'}
-              </span>
+      <div className="flex-1 overflow-y-auto scroll-content px-4 pb-4 space-y-3">
+        {/* Wallet required notice */}
+        {!wallet && (
+          <div className="glass-card p-3 border border-orange-500/20">
+            <div className="flex items-center gap-2">
+              <span className="text-orange-400">⚠️</span>
+              <span className="text-[10px] text-orange-300">Подключите TON кошелёк для создания ставок. Ставки без кошелька не принимаются.</span>
             </div>
           </div>
         )}
 
-        {/* Step 2 */}
+        {/* Step 1 — Description */}
+        {step === 1 && (
+          <div className="space-y-3 animate-fadeIn">
+            <div>
+              <div className="text-xs font-bold text-white/60 mb-1.5">Заголовок ставки *</div>
+              <input
+                className="glass-input w-full rounded-xl px-4 py-3 text-sm"
+                placeholder="Например: Bitcoin достигнет $150k до конца 2025?"
+                value={title}
+                onChange={(e) => setTitle(e.target.value.replace(/[<>]/g, ''))}
+                maxLength={120}
+              />
+              <div className="flex justify-between text-[10px] mt-1">
+                <span className={title.length < 10 ? 'text-red-400' : 'text-emerald-400'}>
+                  {title.length < 10 ? `Мин. 10 символов (${10 - title.length} осталось)` : '✓ Отлично'}
+                </span>
+                <span className="text-white/30">{title.length}/120</span>
+              </div>
+            </div>
+
+            <div>
+              <div className="text-xs font-bold text-white/60 mb-1.5">Подробное описание *</div>
+              <textarea
+                className="glass-input w-full rounded-xl px-4 py-3 text-sm resize-none"
+                rows={4}
+                placeholder="Опишите условия ставки максимально точно. Укажите источник для проверки результата (сайт, API, документ)."
+                value={description}
+                onChange={(e) => setDescription(e.target.value.replace(/[<>]/g, ''))}
+                maxLength={1000}
+              />
+              <div className="flex justify-between text-[10px] mt-1">
+                <span className={description.length < 20 ? 'text-red-400' : 'text-emerald-400'}>
+                  {description.length < 20 ? `Мин. 20 символов` : '✓ Готово'}
+                </span>
+                <span className="text-white/30">{description.length}/1000</span>
+              </div>
+            </div>
+
+            <div className="glass-card p-3 border border-blue-500/20">
+              <div className="text-[10px] font-bold text-blue-300 mb-1">💡 Правила создания ставок</div>
+              <div className="text-[10px] text-white/40 space-y-0.5">
+                <div>• Формулировка должна иметь однозначный ответ ДА/НЕТ</div>
+                <div>• Укажите точный источник для проверки результата</div>
+                <div>• Нельзя создавать ставки на незаконные события</div>
+                <div>• Ставки проходят модерацию перед публикацией</div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Step 2 — Category */}
         {step === 2 && (
-          <div className="animate-fadeIn grid grid-cols-2 gap-2">
+          <div className="space-y-2 animate-fadeIn">
+            <div className="text-xs font-bold text-white/60 mb-2">Выберите категорию</div>
             {CATEGORIES.map((cat) => (
               <button
                 key={cat.key}
                 onClick={() => setCategory(cat.key)}
-                className={`glass-card p-3 text-left transition-all ${category === cat.key ? 'border-purple-500/50 bg-purple-500/10' : ''}`}
+                className={`w-full glass-card p-3 rounded-xl text-left transition-all ${
+                  category === cat.key
+                    ? 'border border-purple-500/50 bg-purple-500/10'
+                    : 'border border-white/5 hover:border-white/10'
+                }`}
               >
-                <div className="text-2xl mb-1">{cat.icon}</div>
-                <div className="text-xs font-bold text-white">{cat.label}</div>
-                <div className="text-[10px] text-white/40">{cat.desc}</div>
+                <div className="flex items-center gap-3">
+                  <span className="text-xl">{cat.icon}</span>
+                  <div>
+                    <div className="text-xs font-bold text-white">{cat.label}</div>
+                    <div className="text-[10px] text-white/40">{cat.desc}</div>
+                  </div>
+                  {category === cat.key && (
+                    <span className="ml-auto text-purple-400">✓</span>
+                  )}
+                </div>
               </button>
             ))}
           </div>
         )}
 
-        {/* Step 3 */}
+        {/* Step 3 — Oracle */}
         {step === 3 && (
-          <div className="animate-fadeIn space-y-3">
+          <div className="space-y-2 animate-fadeIn">
+            <div className="text-xs font-bold text-white/60 mb-2">Как определяется результат?</div>
             {ORACLE_TYPES.map((ot) => (
               <button
                 key={ot.key}
-                onClick={() => setOracleType(ot.key)}
-                className={`glass-card p-4 w-full text-left transition-all ${oracleType === ot.key ? 'border-purple-500/50 bg-purple-500/10' : ''}`}
+                onClick={() => setOracleType(ot.key as typeof oracleType)}
+                className={`w-full glass-card p-3 rounded-xl text-left transition-all ${
+                  oracleType === ot.key
+                    ? 'border border-purple-500/50 bg-purple-500/10'
+                    : 'border border-white/5 hover:border-white/10'
+                }`}
               >
-                <div className="flex items-center gap-3">
-                  <span className="text-2xl">{ot.icon}</span>
-                  <div>
-                    <div className="text-sm font-bold text-white">{ot.label}</div>
-                    <div className="text-xs text-white/40">{ot.desc}</div>
+                <div className="flex items-start gap-3">
+                  <span className="text-xl flex-shrink-0">{ot.icon}</span>
+                  <div className="flex-1">
+                    <div className="text-xs font-bold text-white">{ot.label}</div>
+                    <div className="text-[10px] text-white/40 mt-0.5">{ot.desc}</div>
                   </div>
-                  {oracleType === ot.key && <span className="ml-auto text-purple-400">✓</span>}
+                  {oracleType === ot.key && (
+                    <span className="flex-shrink-0 text-purple-400">✓</span>
+                  )}
                 </div>
               </button>
             ))}
+
             {oracleType === 'price' && (
-              <div className="glass-card p-3 space-y-2">
-                <label className="block text-xs font-semibold text-white/60">Токен</label>
-                <select
-                  value={oracleSymbol}
-                  onChange={(e) => setOracleSymbol(e.target.value)}
-                  className="glass-input w-full rounded-xl px-3 py-2 text-sm"
-                  style={{ background: 'rgba(255,255,255,0.04)' }}
-                >
-                  <option value="" style={{ background: '#050510' }}>Выберите токен</option>
-                  {CRYPTO_SYMBOLS.map((s) => (
-                    <option key={s} value={s} style={{ background: '#050510' }}>{s}</option>
-                  ))}
-                </select>
-                <label className="block text-xs font-semibold text-white/60">Целевая цена ($)</label>
-                <input
-                  type="number"
-                  className="glass-input w-full rounded-xl px-3 py-2 text-sm"
-                  placeholder="120000"
-                  value={oracleTarget}
-                  onChange={(e) => setOracleTarget(e.target.value)}
-                />
+              <div className="glass-card p-3 border border-blue-500/20 space-y-2 animate-fadeIn">
+                <div className="text-[10px] font-bold text-blue-300">Настройка ценового оракула</div>
+                <div>
+                  <div className="text-[10px] text-white/40 mb-1">CoinGecko ID (например: bitcoin, ethereum)</div>
+                  <input
+                    className="glass-input w-full rounded-xl px-3 py-2 text-xs"
+                    value={oracleSymbol}
+                    onChange={(e) => setOracleSymbol(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
+                    placeholder="bitcoin"
+                  />
+                </div>
                 <div className="flex gap-2">
-                  <button
-                    onClick={() => setOracleDirection('above')}
-                    className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-all ${oracleDirection === 'above' ? 'bg-emerald-500/30 text-emerald-400 border border-emerald-500/50' : 'glass-input text-white/50'}`}
-                  >
-                    ↑ Выше
-                  </button>
-                  <button
-                    onClick={() => setOracleDirection('below')}
-                    className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-all ${oracleDirection === 'below' ? 'bg-red-500/30 text-red-400 border border-red-500/50' : 'glass-input text-white/50'}`}
-                  >
-                    ↓ Ниже
-                  </button>
+                  <div className="flex-1">
+                    <div className="text-[10px] text-white/40 mb-1">Целевая цена ($)</div>
+                    <input
+                      type="number"
+                      className="glass-input w-full rounded-xl px-3 py-2 text-xs"
+                      value={oracleTarget}
+                      onChange={(e) => setOracleTarget(parseFloat(e.target.value) || 0)}
+                    />
+                  </div>
+                  <div>
+                    <div className="text-[10px] text-white/40 mb-1">Направление</div>
+                    <select
+                      className="glass-input rounded-xl px-3 py-2 text-xs h-full"
+                      value={oracleDirection}
+                      onChange={(e) => setOracleDirection(e.target.value as 'above' | 'below')}
+                      style={{ background: '#0f0f2d' }}
+                    >
+                      <option value="above">Выше ↑</option>
+                      <option value="below">Ниже ↓</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="text-[10px] text-emerald-400/80">
+                  ✓ Автоматическое разрешение — нет ручного вмешательства
                 </div>
               </div>
             )}
           </div>
         )}
 
-        {/* Step 4 */}
+        {/* Step 4 — Parameters */}
         {step === 4 && (
-          <div className="animate-fadeIn space-y-4">
+          <div className="space-y-3 animate-fadeIn">
             <div>
-              <label className="block text-xs font-semibold text-white/60 mb-2">Длительность</label>
+              <div className="text-xs font-bold text-white/60 mb-2">Срок ставки</div>
               <div className="grid grid-cols-3 gap-2">
                 {DURATIONS.map((d) => (
                   <button
-                    key={d.hours}
-                    onClick={() => setDurationHours(d.hours)}
-                    className={`py-2 rounded-xl text-xs font-bold transition-all ${durationHours === d.hours ? 'bg-purple-500/30 text-purple-300 border border-purple-500/50' : 'glass-input text-white/50'}`}
+                    key={d.ms}
+                    onClick={() => setDuration(d.ms)}
+                    className={`glass-card p-2.5 rounded-xl text-[11px] font-bold transition-all ${
+                      duration === d.ms ? 'border border-purple-500/50 text-purple-300 bg-purple-500/10' : 'text-white/50'
+                    }`}
                   >
                     {d.label}
                   </button>
@@ -322,116 +354,87 @@ export function CreateBet() {
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-white/60 mb-2">
-                Начальная ликвидность (TON)
-              </label>
-              <div className="flex items-center gap-2 mb-2">
-                <input
-                  type="range"
-                  min={MIN_LIQUIDITY_TON}
-                  max={10}
-                  step={0.1}
-                  value={initialLiquidity}
-                  onChange={(e) => setInitialLiquidity(Number(e.target.value))}
-                  className="flex-1"
-                />
-                <div className="flex items-center gap-1 glass-input rounded-lg px-2 py-1.5 min-w-[80px] justify-center">
-                  <span className="text-[#0098EA] text-sm">💎</span>
-                  <span className="text-sm font-bold text-white">{initialLiquidity.toFixed(1)}</span>
-                </div>
-              </div>
-              <div className="text-[10px] text-white/40">
-                Эта сумма будет переведена в контракт TON как начальный пул ликвидности
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-white/60 mb-2">Теги (через запятую)</label>
+              <div className="text-xs font-bold text-white/60 mb-1.5">Теги (через запятую)</div>
               <input
-                className="glass-input w-full rounded-xl px-4 py-3 text-sm"
-                placeholder="BTC, Bitcoin, Bull Run"
+                className="glass-input w-full rounded-xl px-4 py-2.5 text-sm"
+                placeholder="BTC, крипто, bull run"
                 value={tags}
                 onChange={(e) => setTags(e.target.value)}
+                maxLength={100}
               />
             </div>
 
-            {/* Preview */}
+            {/* Summary */}
             <div className="glass-card p-3 border border-purple-500/20">
-              <div className="text-xs font-bold text-white/60 mb-2">📋 Итоговые параметры</div>
-              <div className="space-y-1 text-xs">
+              <div className="text-[10px] font-bold text-purple-300 mb-2">📋 Итог</div>
+              <div className="space-y-1.5 text-[10px]">
                 <div className="flex justify-between">
-                  <span className="text-white/40">Ликвидность:</span>
-                  <span className="text-[#0098EA] font-bold">💎 {initialLiquidity} TON</span>
+                  <span className="text-white/40">Название</span>
+                  <span className="text-white font-medium text-right ml-4 line-clamp-1">{title || '—'}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-white/40">Категория:</span>
-                  <span className="text-white">{CATEGORIES.find(c => c.key === category)?.label}</span>
+                  <span className="text-white/40">Категория</span>
+                  <span className="text-white">{CATEGORIES.find((c) => c.key === category)?.icon} {category}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-white/40">Оракул:</span>
-                  <span className="text-white">{ORACLE_TYPES.find(o => o.key === oracleType)?.label}</span>
+                  <span className="text-white/40">Оракул</span>
+                  <span className="text-white">{ORACLE_TYPES.find((o) => o.key === oracleType)?.icon} {ORACLE_TYPES.find((o) => o.key === oracleType)?.label}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-white/40">Длительность:</span>
-                  <span className="text-white">{DURATIONS.find(d => d.hours === durationHours)?.label}</span>
+                  <span className="text-white/40">Срок</span>
+                  <span className="text-white">{DURATIONS.find((d) => d.ms === duration)?.label}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-white/40">Комиссия:</span>
-                  <span className="text-yellow-400">5%</span>
+                  <span className="text-white/40">Мин. ставка</span>
+                  <span className="text-white">{SECURITY_CONFIG.MIN_BET_TON} TON</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-white/40">Комиссия</span>
+                  <span className="text-white">{SECURITY_CONFIG.PLATFORM_FEE_PCT * 100}% платформа + {SECURITY_CONFIG.VALIDATOR_REWARD_PCT * 100}% валидаторам</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-white/40">Пул при старте</span>
+                  <span className="text-emerald-400 font-bold">0 TON (только реальные ставки)</span>
                 </div>
               </div>
             </div>
 
-            {txError && (
-              <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-3 text-xs text-red-400">
-                ❌ {txError}
-              </div>
-            )}
-
-            {!wallet && (
-              <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3 text-xs text-white/60 flex items-center gap-2">
-                <span className="text-[#0098EA]">💎</span>
-                Для создания ставки нужен TON кошелёк
+            {error && (
+              <div className="glass-card p-3 border border-red-500/30">
+                <div className="text-[10px] text-red-400">❌ {error}</div>
               </div>
             )}
           </div>
         )}
       </div>
 
-      {/* Navigation */}
-      <div className="flex-shrink-0 px-4 pb-6 pt-3 flex gap-3" style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+      {/* Footer */}
+      <div className="flex-shrink-0 px-4 pb-4 pt-2 flex gap-2">
         {step > 1 && (
           <button
             onClick={() => setStep(step - 1)}
-            className="flex-1 py-3 rounded-xl glass-input text-white/60 font-bold text-sm"
+            className="flex-1 py-3 rounded-xl glass-card text-white/60 text-sm font-bold"
           >
             ← Назад
           </button>
         )}
         {step < 4 ? (
           <button
-            onClick={() => setStep(step + 1)}
+            onClick={() => canProceed() && setStep(step + 1)}
             disabled={!canProceed()}
-            className="flex-1 btn-primary py-3 rounded-xl text-white font-bold text-sm disabled:opacity-40"
+            className={`flex-1 py-3 rounded-xl text-sm font-bold transition-all ${
+              canProceed() ? 'btn-primary text-white' : 'glass-card text-white/30 cursor-not-allowed'
+            }`}
           >
             Далее →
           </button>
         ) : (
           <button
             onClick={handleSubmit}
-            disabled={!canProceed() || isTxPending}
-            className="flex-1 btn-primary py-3 rounded-xl text-white font-black text-sm disabled:opacity-40 flex items-center justify-center gap-2"
+            disabled={!title || !description || title.length < 10}
+            className="flex-1 py-3 rounded-xl btn-primary text-white text-sm font-bold"
           >
-            {isTxPending ? (
-              <>
-                <span className="animate-spin">⚡</span>
-                Отправляем в TON...
-              </>
-            ) : !wallet ? (
-              <>💎 Подключить кошелёк</>
-            ) : (
-              <>💎 Создать за {initialLiquidity} TON</>
-            )}
+            🚀 Отправить на модерацию
           </button>
         )}
       </div>

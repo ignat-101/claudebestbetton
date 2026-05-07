@@ -136,11 +136,17 @@ body {
   to { transform: rotate(360deg); }
 }
 
+@keyframes ticker-scroll {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
 .animate-slideUp { animation: slideUp 0.35s cubic-bezier(0.32, 0.72, 0, 1); }
 .animate-fadeIn { animation: fadeIn 0.25s ease-out; }
 .animate-float { animation: float 3s ease-in-out infinite; }
 .animate-pulse-glow { animation: pulse-glow 2s ease-in-out infinite; }
 .animate-spin-slow { animation: spin-slow 8s linear infinite; }
+.animate-ticker { animation: ticker-scroll 30s linear infinite; }
 
 /* Shimmer loading */
 .shimmer {
@@ -292,25 +298,20 @@ input[type="range"]::-webkit-slider-thumb {
   color: #c4b5fd;
 }
 
-/* Blob */
-.blob {
-  position: absolute;
-  border-radius: 50%;
-  filter: blur(80px);
-  opacity: 0.15;
-  pointer-events: none;
+/* Security badge */
+.security-badge {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.15), rgba(16, 185, 129, 0.05));
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  color: #34d399;
+  border-radius: 8px;
+  padding: 2px 8px;
+  font-size: 10px;
+  font-weight: 700;
 }
 
-/* TON Connect button override */
-[data-tc-button] {
-  background: rgba(0,152,234,0.15) !important;
-  border: 1px solid rgba(0,152,234,0.4) !important;
-  border-radius: 12px !important;
-  color: #0098EA !important;
-  font-family: inherit !important;
-}
-
-/* Safe area bottom */
-.safe-bottom {
-  padding-bottom: env(safe-area-inset-bottom, 0px);
+/* PoS indicator */
+.pos-indicator {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(139, 92, 246, 0.1));
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 12px;
 }

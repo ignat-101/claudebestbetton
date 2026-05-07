@@ -9,11 +9,10 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@tonconnect/sdk": "^3.4.1",
     "@tonconnect/ui-react": "^2.4.4",
-    "buffer": "^6.0.3",
     "clsx": "2.1.1",
     "date-fns": "^4.1.0",
-    "lucide-react": "^1.14.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "recharts": "^3.8.1",

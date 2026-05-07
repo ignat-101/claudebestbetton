@@ -1,102 +1,89 @@
 import { useEffect, useState } from 'react';
 import { useStore } from '../store/useStore';
 
-interface TickerItem {
-  symbol: string;
-  name: string;
-  price: number;
-  change: number;
-}
-
-const MOCK_PRICES: TickerItem[] = [
-  { symbol: 'BTC', name: 'Bitcoin', price: 107842, change: 2.4 },
-  { symbol: 'ETH', name: 'Ethereum', price: 3847, change: -1.2 },
-  { symbol: 'TON', name: 'TON', price: 6.84, change: 5.7 },
-  { symbol: 'SOL', name: 'Solana', price: 198.3, change: 3.1 },
-  { symbol: 'BNB', name: 'BNB', price: 687, change: 0.8 },
-  { symbol: 'XRP', name: 'XRP', price: 2.43, change: -0.5 },
+const SYMBOLS = [
+  { id: 'bitcoin', symbol: 'BTC', icon: '₿' },
+  { id: 'ethereum', symbol: 'ETH', icon: 'Ξ' },
+  { id: 'the-open-network', symbol: 'TON', icon: '💎' },
+  { id: 'solana', symbol: 'SOL', icon: '◎' },
+  { id: 'binancecoin', symbol: 'BNB', icon: '⬡' },
+  { id: 'notcoin', symbol: 'NOT', icon: '🔔' },
 ];
 
+function formatPrice(p: number): string {
+  if (p >= 1000) return `$${p.toLocaleString('en', { maximumFractionDigits: 0 })}`;
+  if (p >= 1) return `$${p.toFixed(2)}`;
+  return `$${p.toFixed(4)}`;
+}
+
 export function CryptoTicker() {
-  const [prices, setPrices] = useState<TickerItem[]>(MOCK_PRICES);
-  const setCryptoPrices = useStore((s) => s.setCryptoPrices);
+  const { cryptoPrices, setCryptoPrices } = useStore();
+  const [error, setError] = useState(false);
 
   useEffect(() => {
-    // Simulate price updates
-    const interval = setInterval(() => {
-      setPrices((prev) =>
-        prev.map((p) => ({
-          ...p,
-          price: p.price * (1 + (Math.random() - 0.5) * 0.002),
-          change: p.change + (Math.random() - 0.5) * 0.3,
-        }))
-      );
-    }, 3000);
-
-    // Try to fetch real prices
     const fetchPrices = async () => {
       try {
+        const ids = SYMBOLS.map((s) => s.id).join(',');
         const res = await fetch(
-          'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,the-open-network,solana,binancecoin,ripple&vs_currencies=usd&include_24hr_change=true',
-          { signal: AbortSignal.timeout(5000) }
+          `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd&include_24hr_change=true`,
+          { signal: AbortSignal.timeout(8000) }
         );
-        if (res.ok) {
-          const data = await res.json();
-          const mapped: Record<string, { price: number; change24h: number; symbol: string }> = {
-            bitcoin: { price: data.bitcoin?.usd || 107842, change24h: data.bitcoin?.usd_24h_change || 0, symbol: 'BTC' },
-            ethereum: { price: data.ethereum?.usd || 3847, change24h: data.ethereum?.usd_24h_change || 0, symbol: 'ETH' },
-            'the-open-network': { price: data['the-open-network']?.usd || 6.84, change24h: data['the-open-network']?.usd_24h_change || 0, symbol: 'TON' },
-            solana: { price: data.solana?.usd || 198.3, change24h: data.solana?.usd_24h_change || 0, symbol: 'SOL' },
-          };
-          setCryptoPrices(mapped);
-          setPrices([
-            { symbol: 'BTC', name: 'Bitcoin', price: mapped.bitcoin?.price || 107842, change: mapped.bitcoin?.change24h || 0 },
-            { symbol: 'ETH', name: 'Ethereum', price: mapped.ethereum?.price || 3847, change: mapped.ethereum?.change24h || 0 },
-            { symbol: 'TON', name: 'TON', price: mapped['the-open-network']?.price || 6.84, change: mapped['the-open-network']?.change24h || 0 },
-            { symbol: 'SOL', name: 'Solana', price: mapped.solana?.price || 198.3, change: mapped.solana?.change24h || 0 },
-            { symbol: 'BNB', name: 'BNB', price: 687, change: 0.8 },
-            { symbol: 'XRP', name: 'XRP', price: 2.43, change: -0.5 },
-          ]);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const prices: Record<string, { usd: number; usd_24h_change: number }> = {};
+        for (const [k, v] of Object.entries(data)) {
+          const val = v as { usd: number; usd_24h_change: number };
+          prices[k] = { usd: val.usd, usd_24h_change: val.usd_24h_change ?? 0 };
         }
+        setCryptoPrices(prices);
+        setError(false);
       } catch {
-        // Use mock data
+        setError(true);
       }
     };
 
     fetchPrices();
+    const interval = setInterval(fetchPrices, 60000);
     return () => clearInterval(interval);
   }, [setCryptoPrices]);
 
-  const formatPrice = (price: number) => {
-    if (price >= 1000) return `$${price.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
-    if (price >= 1) return `$${price.toFixed(2)}`;
-    return `$${price.toFixed(4)}`;
-  };
+  const items = SYMBOLS.map((s) => ({
+    ...s,
+    price: cryptoPrices[s.id]?.usd ?? 0,
+    change: cryptoPrices[s.id]?.usd_24h_change ?? 0,
+  })).filter((s) => s.price > 0);
+
+  if (items.length === 0) {
+    return (
+      <div className="h-8 flex items-center px-4 overflow-hidden"
+        style={{ background: 'rgba(0,0,0,0.3)', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+        <span className="text-[10px] text-white/20 animate-pulse">
+          {error ? '⚠️ Нет соединения с оракулом цен' : '🔄 Загрузка цен...'}
+        </span>
+      </div>
+    );
+  }
 
   return (
-    <div className="relative overflow-hidden" style={{ height: '32px' }}>
-      <div className="flex gap-6 animate-ticker" style={{
-        display: 'flex',
-        gap: '32px',
-        animation: 'ticker 30s linear infinite',
-        whiteSpace: 'nowrap',
-      }}>
-        {[...prices, ...prices].map((item, i) => (
-          <span key={i} className="flex items-center gap-2 text-xs font-medium">
-            <span className="text-purple-400 font-bold">{item.symbol}</span>
-            <span className="text-white/80">{formatPrice(item.price)}</span>
-            <span className={item.change >= 0 ? 'text-emerald-400' : 'text-red-400'}>
+    <div className="h-8 flex items-center overflow-hidden relative"
+      style={{ background: 'rgba(0,0,0,0.3)', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+      <div className="flex animate-ticker whitespace-nowrap">
+        {[...items, ...items].map((item, i) => (
+          <div key={i} className="flex items-center gap-1.5 px-4">
+            <span className="text-[10px] text-white/40 font-mono">{item.icon}</span>
+            <span className="text-[10px] font-bold text-white/70">{item.symbol}</span>
+            <span className="text-[10px] font-mono text-white/90">{formatPrice(item.price)}</span>
+            <span className={`text-[9px] font-bold ${item.change >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
               {item.change >= 0 ? '▲' : '▼'} {Math.abs(item.change).toFixed(2)}%
             </span>
-          </span>
+          </div>
         ))}
       </div>
-      <style>{`
-        @keyframes ticker {
-          0% { transform: translateX(0); }
-          100% { transform: translateX(-50%); }
-        }
-      `}</style>
+      {/* Live indicator */}
+      <div className="absolute right-2 flex items-center gap-1">
+        <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse-glow" />
+        <span className="text-[9px] text-emerald-400 font-bold">LIVE</span>
+      </div>
     </div>
   );
 }
