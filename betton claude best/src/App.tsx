@@ -1,5 +1,4 @@
 import { useEffect } from 'react';
-import { TonConnectUIProvider } from '@tonconnect/ui-react';
 import { useStore } from './store/useStore';
 import { CryptoTicker } from './components/CryptoTicker';
 import { BetsList } from './components/BetsList';
@@ -8,165 +7,112 @@ import { CreateBet } from './components/CreateBet';
 import { Portfolio } from './components/Portfolio';
 import { AdminPanel } from './components/AdminPanel';
 import { Profile } from './components/Profile';
-import { parseTelegramInitData, generateReferralCode } from './security/proofOfStake';
-import './index.css';
+import { Leaderboard } from './components/Leaderboard';
 
-/**
- * TON Connect Manifest — укажите ваш реальный URL после деплоя
- */
-const MANIFEST_URL = 'https://raw.githubusercontent.com/ignat-101/claudebestbetton/main/betton%20claude%20best/tonconnect-manifest.json';
-
-// ════════════════════════════════════════════════════════
-//  TABS CONFIG
-// ════════════════════════════════════════════════════════
+// ─────────────────────────────────────────────────────────
+// TAB CONFIG
+// ─────────────────────────────────────────────────────────
 const TABS = [
-  { key: 'bets', icon: '🎲', label: 'Ставки' },
-  { key: 'create', icon: '➕', label: 'Создать' },
-  { key: 'portfolio', icon: '📊', label: 'Портфолио' },
-  { key: 'admin', icon: '🛡️', label: 'Админ' },
-  { key: 'profile', icon: '👤', label: 'Профиль' },
+  { key: 'bets',        label: 'Рынки',    icon: '📊' },
+  { key: 'leaderboard', label: 'Топ',       icon: '🏆' },
+  { key: 'create',      label: 'Создать',   icon: '➕' },
+  { key: 'portfolio',   label: 'Портфель',  icon: '💼' },
+  { key: 'profile',     label: 'Профиль',   icon: '👤' },
 ] as const;
 
-// ════════════════════════════════════════════════════════
-//  INNER APP (inside TonConnectUIProvider)
-// ════════════════════════════════════════════════════════
+type Tab = typeof TABS[number]['key'];
+
+// ─────────────────────────────────────────────────────────
+// INNER APP
+// ─────────────────────────────────────────────────────────
 function InnerApp() {
-  const { activeTab, setActiveTab, selectedBetId, bets, currentUser, setCurrentUser } = useStore();
+  const {
+    activeTab, setActiveTab,
+    selectedBetId,
+    currentUser, setCurrentUser,
+    tonWalletAddress,
+    viewingUserId, setViewingUserId,
+    bets, updateFinancialMetrics,
+  } = useStore();
 
-  // ─────────────────────────────────────────────────────
-  //  Telegram initData — безопасная инициализация
-  //  isAdmin: ТОЛЬКО из Telegram initData, НИКОГДА из localStorage
-  // ─────────────────────────────────────────────────────
+  // Init financial metrics
+  useEffect(() => { updateFinancialMetrics(); }, []);
+
+  // Demo: simulate Telegram initData & wallet connection for preview
   useEffect(() => {
-    try {
-      const tg = (window as Window & { Telegram?: { WebApp?: {
-        initData: string;
-        initDataUnsafe?: { user?: { id: number; username?: string; first_name?: string } };
-        ready?: () => void;
-        expand?: () => void;
-      } } }).Telegram;
-      const webApp = tg?.WebApp;
-
-      if (webApp) {
-        webApp.ready?.();
-        webApp.expand?.();
-
-        const initData = webApp.initData;
-        const parsed = parseTelegramInitData(initData);
-
-        if (parsed.isValid && parsed.userId) {
-          // ⚠️ КРИТИЧНО: isAdmin определяется только по telegramId
-          // В production — верифицируйте HMAC на backend
-          // ADMIN_TG_IDS — список ID администраторов (задаётся в env)
-          const ADMIN_IDS: number[] = [
-            // Добавьте ваш Telegram ID сюда для тестирования
-            // Например: 123456789
-          ];
-
-          const isAdmin = ADMIN_IDS.includes(parsed.userId);
-          const userId = `tg_${parsed.userId}`;
-
-          setCurrentUser({
-            ...currentUser,
-            id: userId,
-            telegramId: parsed.userId,
-            username: parsed.username ?? `user${parsed.userId}`,
-            firstName: parsed.firstName ?? 'TON',
-            isAdmin,
-            referralCode: generateReferralCode(userId),
-          });
-        }
-      }
-    } catch (e) {
-      // Не в Telegram — продолжаем без инициализации
-      console.warn('Not in Telegram WebApp context');
+    // In production: parse window.Telegram.WebApp.initData and verify HMAC server-side
+    // isAdmin is NEVER set client-side from user input — backend only
+    // Here we allow demo mode by checking URL param ?admin=1 (dev only, never in production)
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('admin') === '1' && import.meta.env.DEV) {
+      setCurrentUser({ ...currentUser, isAdmin: true });
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Simulate a connected wallet for demo
+    if (!tonWalletAddress) {
+      // Comment out to require real TON Connect wallet
+      // setTonWalletAddress('demo_wallet_address');
+    }
   }, []);
 
-  const pendingCount = bets.filter((b) => b.status === 'pending').length;
+  const pendingCount = bets.filter(b => !b.adminApproved && b.status === 'pending').length;
+  const visibleTabs = currentUser.isAdmin
+    ? [...TABS, { key: 'admin' as const, label: 'Админ', icon: '⚙️' }]
+    : TABS;
 
-  // Показываем вкладку Admin только если isAdmin
-  const visibleTabs = TABS.filter((t) => t.key !== 'admin' || currentUser.isAdmin);
+  const handleTabClick = (key: Tab | 'admin') => {
+    setViewingUserId(null);
+    setActiveTab(key as any);
+  };
 
   return (
-    <div
-      className="flex flex-col bg-mesh"
-      style={{ height: '100dvh', maxWidth: 430, margin: '0 auto', position: 'relative' }}
-    >
-      {/* Ambient background blobs */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div
-          className="absolute w-64 h-64 rounded-full opacity-20 animate-float"
-          style={{
-            background: 'radial-gradient(circle, rgba(139,92,246,0.4) 0%, transparent 70%)',
-            top: '-32px', left: '-32px',
-            filter: 'blur(40px)',
-          }}
-        />
-        <div
-          className="absolute w-48 h-48 rounded-full opacity-15"
-          style={{
-            background: 'radial-gradient(circle, rgba(59,130,246,0.4) 0%, transparent 70%)',
-            bottom: '80px', right: '-24px',
-            filter: 'blur(40px)',
-          }}
-        />
-      </div>
-
+    <div className="flex flex-col h-full max-w-md mx-auto bg-mesh" style={{ height: '100dvh' }}>
       {/* Crypto ticker */}
       <CryptoTicker />
 
       {/* Main content */}
-      <div className="flex-1 overflow-hidden relative z-10">
+      <div className="flex-1 overflow-hidden" style={{ paddingBottom: 'var(--tab-height)' }}>
         {activeTab === 'bets' && !selectedBetId && <BetsList />}
         {activeTab === 'bets' && selectedBetId && <BetDetail />}
         {activeTab === 'create' && <CreateBet />}
         {activeTab === 'portfolio' && <Portfolio />}
         {activeTab === 'admin' && <AdminPanel />}
-        {activeTab === 'profile' && <Profile />}
+        {activeTab === 'leaderboard' && <Leaderboard />}
+        {activeTab === 'profile' && (
+          viewingUserId && viewingUserId !== currentUser.id
+            ? <Profile userId={viewingUserId} />
+            : <Profile userId={null} />
+        )}
       </div>
 
       {/* Bottom tab bar */}
-      <div
-        className="tab-nav flex-shrink-0 relative z-20"
-        style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
-      >
-        <div className="flex items-stretch">
+      <div className="tab-nav fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md" style={{ height: 'var(--tab-height)' }}>
+        <div className="flex h-full items-center px-2">
           {visibleTabs.map((tab) => {
             const isActive = activeTab === tab.key;
-            const isPending = tab.key === 'admin' && pendingCount > 0;
-
+            const hasBadge = tab.key === 'admin' && pendingCount > 0;
             return (
               <button
                 key={tab.key}
-                onClick={() => {
-                  setActiveTab(tab.key);
-                }}
-                className={`flex-1 flex flex-col items-center justify-center py-2.5 relative transition-all ${
-                  isActive ? 'text-white' : 'text-white/30'
+                onClick={() => handleTabClick(tab.key)}
+                className={`relative flex-1 flex flex-col items-center justify-center gap-0.5 py-2 rounded-xl transition-all duration-200 ${
+                  isActive
+                    ? 'bg-white/8 text-white'
+                    : 'text-white/35 hover:text-white/60'
                 }`}
-                style={{ minHeight: 56 }}
               >
-                {/* Active indicator */}
-                {isActive && (
-                  <div className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-0.5 bg-purple-500 rounded-full" />
-                )}
-
-                <span
-                  className={`text-xl mb-0.5 transition-transform ${isActive ? 'scale-110' : 'scale-100'}`}
-                >
+                <span className={`text-[20px] leading-none transition-transform duration-200 ${isActive ? 'scale-110' : ''}`}>
                   {tab.icon}
                 </span>
-                <span className={`text-[9px] font-semibold leading-none ${isActive ? 'text-purple-300' : 'text-white/30'}`}>
+                <span className={`text-[9px] font-semibold leading-none transition-all ${isActive ? 'text-white' : 'text-white/35'}`}>
                   {tab.label}
                 </span>
-
-                {/* Badge for admin pending */}
-                {isPending && (
-                  <span className="absolute top-1.5 right-[calc(50%-16px)] bg-red-500 text-white text-[8px] font-black w-3.5 h-3.5 rounded-full flex items-center justify-center">
-                    {pendingCount > 9 ? '9+' : pendingCount}
-                  </span>
+                {isActive && (
+                  <div className="absolute -top-0.5 left-1/2 -translate-x-1/2 w-4 h-0.5 bg-purple-400 rounded-full" />
+                )}
+                {hasBadge && (
+                  <div className="absolute top-1 right-2 w-4 h-4 bg-red-500 rounded-full flex items-center justify-center">
+                    <span className="text-[9px] text-white font-bold">{pendingCount}</span>
+                  </div>
                 )}
               </button>
             );
@@ -177,13 +123,9 @@ function InnerApp() {
   );
 }
 
-// ════════════════════════════════════════════════════════
-//  ROOT APP with TON Connect Provider
-// ════════════════════════════════════════════════════════
+// ─────────────────────────────────────────────────────────
+// ROOT APP
+// ─────────────────────────────────────────────────────────
 export default function App() {
-  return (
-    <TonConnectUIProvider manifestUrl={MANIFEST_URL}>
-      <InnerApp />
-    </TonConnectUIProvider>
-  );
+  return <InnerApp />;
 }

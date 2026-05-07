@@ -1,290 +1,309 @@
-import { useTonConnectUI, useTonWallet, TonConnectButton, useTonAddress } from '@tonconnect/ui-react';
-import { useStore } from '../store/useStore';
-import { TREASURY_WALLET_ADDRESS } from '../store/useStore';
+import { useState } from 'react';
+import { useStore, RANK_META, computeRank, DEMO_USERS } from '../store/useStore';
 import { SECURITY_CONFIG } from '../security/proofOfStake';
+import { formatDistanceToNow } from 'date-fns';
+import { ru } from 'date-fns/locale';
 
-export function Profile() {
-  const { currentUser, transactions, setTonWalletAddress } = useStore();
-  const wallet = useTonWallet();
-  const friendlyAddress = useTonAddress(true);
-  const rawAddress = useTonAddress(false);
-  const [tonConnectUI] = useTonConnectUI();
+interface Props {
+  /** If set, show this user's PUBLIC profile (read-only). Null = own profile. */
+  userId?: string | null;
+}
 
-  const unreadCount = currentUser.notifications.filter((n) => !n.read).length;
-  const totalBets = currentUser.activeBets.length + currentUser.resolvedBets.length;
-  const recentTxs = transactions.slice(0, 5);
-  const confirmedTxs = transactions.filter((t) => t.onChainConfirmed);
+export function Profile({ userId }: Props) {
+  const { currentUser, setCurrentUser, bets, linkTonDomain, unlinkTonDomain, setViewingUserId, setActiveTab } = useStore();
 
-  const reputationLevel = currentUser.reputation >= 1000
-    ? { label: '💎 Легенда', color: 'text-yellow-400' }
-    : currentUser.reputation >= 500
-    ? { label: '🥇 Эксперт', color: 'text-purple-400' }
-    : currentUser.reputation >= 200
-    ? { label: '🥈 Ветеран', color: 'text-blue-400' }
-    : { label: '🥉 Новичок', color: 'text-white/50' };
+  // Resolve which user to display
+  const isOwnProfile = !userId || userId === currentUser.id;
+  const demoUser = DEMO_USERS.find(u => u.id === userId);
+  const viewUser = isOwnProfile ? currentUser : (demoUser ? { ...demoUser, isAdmin: false, notifications: [] } : null);
 
-  // Обновляем адрес в store при подключении кошелька
-  if (rawAddress && rawAddress !== currentUser.walletAddress) {
-    setTonWalletAddress(rawAddress);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState({ username: currentUser.username, bio: currentUser.bio ?? '', avatar: currentUser.avatar });
+  const [domainInput, setDomainInput] = useState('');
+  const [domainError, setDomainError] = useState('');
+  const [domainSuccess, setDomainSuccess] = useState('');
+  const [showDomainForm, setShowDomainForm] = useState(false);
+
+  if (!viewUser) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full text-white/40">
+        <div className="text-4xl mb-3">👤</div>
+        <p>Пользователь не найден</p>
+      </div>
+    );
   }
 
+  const rank = computeRank(viewUser.reputation);
+  const rankMeta = RANK_META[rank];
+  const myBets = isOwnProfile
+    ? bets.filter(b => b.participants.some(p => p.userId === viewUser.id))
+    : bets.filter(b => viewUser.profilePublic && b.participants.some(p => p.userId === viewUser.id));
+
+  const recentBets = myBets.slice(0, 5);
+  const roi = viewUser.totalWagered > 0
+    ? ((viewUser.totalWon - viewUser.totalWagered) / viewUser.totalWagered * 100).toFixed(1)
+    : '0.0';
+  const roiPos = parseFloat(roi) >= 0;
+  const unreadCount = isOwnProfile ? currentUser.notifications.filter(n => !n.read).length : 0;
+
+  const saveEdit = () => {
+    setCurrentUser({
+      ...currentUser,
+      username: draft.username.slice(0, 24) || currentUser.username,
+      bio: draft.bio.slice(0, 120),
+      avatar: draft.avatar,
+    });
+    setEditing(false);
+  };
+
+  const handleLinkDomain = () => {
+    setDomainError('');
+    setDomainSuccess('');
+    const result = linkTonDomain(domainInput);
+    if (result.ok) {
+      setDomainSuccess(`✅ ${domainInput} привязан! Верификация через TON DNS займёт ~5 мин.`);
+      setDomainInput('');
+      setTimeout(() => { setDomainSuccess(''); setShowDomainForm(false); }, 3000);
+    } else {
+      setDomainError(result.error ?? 'Ошибка');
+    }
+  };
+
+  const AVATARS = ['🎯', '🐺', '🐳', '🧙', '🌙', '⚔️', '🦊', '🦁', '🐉', '🤖', '👾', '🎭'];
+
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex-shrink-0 px-4 pt-4 pb-3">
-        <h1 className="text-xl font-black text-white">👤 Профиль</h1>
+    <div className="flex flex-col h-full bg-mesh">
+      {/* Header */}
+      <div className="flex-shrink-0 px-4 pt-4 pb-2">
+        {!isOwnProfile && (
+          <button onClick={() => { setViewingUserId(null); setActiveTab('leaderboard'); }}
+            className="flex items-center gap-1.5 text-white/50 text-[12px] mb-3 hover:text-white transition-colors">
+            ← Назад
+          </button>
+        )}
+        <h1 className="text-xl font-black text-white">{isOwnProfile ? 'Профиль' : `@${viewUser.username}`}</h1>
       </div>
 
-      <div className="flex-1 overflow-y-auto scroll-content px-4 pb-6 space-y-3">
-        {/* User card */}
-        <div className="glass-card p-4 relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-32 h-32 rounded-full bg-purple-500/10 -mr-8 -mt-8" />
-          <div className="flex items-center gap-4 mb-3 relative">
-            <div className="text-5xl">{currentUser.avatar}</div>
-            <div>
-              <div className="text-lg font-black text-white">{currentUser.firstName} {currentUser.lastName}</div>
-              <div className="text-sm text-white/50">@{currentUser.username}</div>
-              <div className={`text-xs font-bold mt-0.5 ${reputationLevel.color}`}>{reputationLevel.label}</div>
+      <div className="flex-1 overflow-y-auto scroll-content px-4 pb-4 space-y-3">
+        {/* Avatar & Info */}
+        <div className="glass-card p-4 rounded-2xl">
+          <div className="flex items-center gap-4">
+            <div className="relative">
+              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-purple-500/30 to-blue-500/30 flex items-center justify-center text-3xl avatar-ring">
+                {viewUser.avatar}
+              </div>
+              <div className={`absolute -bottom-1 -right-1 text-xs px-1 py-0.5 rounded-full font-bold ${rankMeta.color} bg-black/60`}>
+                {rankMeta.emoji}
+              </div>
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-base font-black text-white">@{viewUser.username}</h2>
+                {viewUser.tonDomains.map(d => (
+                  <span key={d.domain} className="ton-domain-badge">
+                    💎 {d.domain}
+                    {d.verified && <span className="text-emerald-400 text-[9px]">✓</span>}
+                  </span>
+                ))}
+              </div>
+              <div className="flex items-center gap-2 mt-1">
+                <span className={`text-[11px] font-semibold ${rankMeta.color}`}>{rankMeta.emoji} {rankMeta.label}</span>
+                <span className="text-white/20">·</span>
+                <span className="text-[11px] text-white/40">Rep: {viewUser.reputation}</span>
+              </div>
+              {viewUser.bio && (
+                <p className="text-[11px] text-white/50 mt-1 line-clamp-2">{viewUser.bio}</p>
+              )}
+              <p className="text-[10px] text-white/25 mt-1">
+                Участник {formatDistanceToNow(viewUser.joinedAt, { locale: ru, addSuffix: true })}
+              </p>
             </div>
           </div>
-          {currentUser.isAdmin && (
-            <div className="flex items-center gap-2 glass-card px-3 py-2 rounded-xl border border-purple-500/30">
-              <span>🛡️</span>
-              <span className="text-xs font-bold text-purple-300">Администратор платформы</span>
+
+          {/* Win streak */}
+          {viewUser.winStreak > 0 && (
+            <div className="mt-3 glass px-3 py-2 rounded-xl flex items-center justify-between">
+              <span className="text-[11px] text-white/50">🔥 Серия побед</span>
+              <span className="text-[12px] font-black text-amber-400">{viewUser.winStreak} подряд</span>
             </div>
           )}
-        </div>
 
-        {/* Security status */}
-        <div className="glass-card p-3 border border-emerald-500/20">
-          <div className="text-[10px] font-bold text-emerald-400 mb-2">🔐 Статус безопасности</div>
-          <div className="space-y-1.5 text-[10px]">
-            <div className="flex justify-between">
-              <span className="text-white/40">TON кошелёк</span>
-              <span className={wallet ? 'text-emerald-400' : 'text-red-400'}>
-                {wallet ? '✓ Подключён' : '✗ Не подключён'}
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-white/40">On-chain транзакции</span>
-              <span className="text-white">{confirmedTxs.length} подтверждено</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-white/40">Лимит ставок</span>
-              <span className="text-white">{SECURITY_CONFIG.MAX_BETS_PER_DAY}/день</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-white/40">isAdmin источник</span>
-              <span className="text-white/30 text-[9px]">Telegram initData (HMAC)</span>
-            </div>
-          </div>
-        </div>
-
-        {/* TON Wallet */}
-        <div className="glass-card p-4">
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2">
-              <span className="text-[#0098EA] text-xl">💎</span>
+          {/* Edit / Actions */}
+          {isOwnProfile && !editing && (
+            <button onClick={() => setEditing(true)}
+              className="mt-3 w-full glass text-white/60 text-[11px] py-2 rounded-xl hover:text-white transition-colors font-semibold">
+              ✏️ Редактировать профиль
+            </button>
+          )}
+          {isOwnProfile && editing && (
+            <div className="mt-3 space-y-2 animate-fadeIn">
               <div>
-                <div className="text-sm font-bold text-white">TON Кошелёк</div>
-                <div className="text-[10px] text-white/40">Реальные транзакции в блокчейн</div>
-              </div>
-            </div>
-          </div>
-
-          {wallet ? (
-            <div className="space-y-2">
-              <div className="glass-card p-3 rounded-xl border border-emerald-500/20">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse-glow" />
-                  <span className="text-xs font-bold text-emerald-400">Подключён</span>
-                  <span className="text-[10px] text-white/30 ml-1">{wallet.device.appName}</span>
-                </div>
-                <div className="font-mono text-[10px] text-white/60 break-all">
-                  {friendlyAddress || rawAddress}
+                <p className="text-[10px] text-white/40 mb-1">Аватар</p>
+                <div className="flex flex-wrap gap-2">
+                  {AVATARS.map(a => (
+                    <button key={a} onClick={() => setDraft(d => ({ ...d, avatar: a }))}
+                      className={`text-xl w-9 h-9 rounded-xl transition-all ${draft.avatar === a ? 'bg-purple-500/30 ring-1 ring-purple-400' : 'glass hover:bg-white/10'}`}>
+                      {a}
+                    </button>
+                  ))}
                 </div>
               </div>
-              <a
-                href={`https://tonscan.org/address/${rawAddress}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="block text-center text-[10px] text-blue-400 hover:underline"
-              >
-                Просмотреть в TONScan ↗
-              </a>
-              <button
-                onClick={() => { tonConnectUI.disconnect(); setTonWalletAddress(null); }}
-                className="w-full py-2 rounded-xl glass-input text-red-400 text-xs font-bold border border-red-500/20"
-              >
-                Отключить кошелёк
-              </button>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              <div className="text-[10px] text-white/40 mb-2">
-                Подключите TON кошелёк чтобы делать реальные ставки. Без кошелька ставки невозможны.
+              <input className="glass-input w-full rounded-xl px-3 py-2 text-[12px]" placeholder="Username"
+                value={draft.username} onChange={e => setDraft(d => ({ ...d, username: e.target.value }))} />
+              <textarea className="glass-input w-full rounded-xl px-3 py-2 text-[12px] resize-none" rows={2} placeholder="Биография (до 120 символов)"
+                value={draft.bio} onChange={e => setDraft(d => ({ ...d, bio: e.target.value.slice(0, 120) }))} />
+              <div className="flex gap-2">
+                <button onClick={saveEdit} className="btn-primary flex-1 text-white text-[12px] font-bold py-2 rounded-xl">Сохранить</button>
+                <button onClick={() => setEditing(false)} className="glass flex-1 text-white/50 text-[12px] py-2 rounded-xl">Отмена</button>
               </div>
-              <TonConnectButton style={{ width: '100%' }} />
             </div>
           )}
-        </div>
-
-        {/* Treasury */}
-        <div className="glass-card p-4 border border-blue-500/20">
-          <div className="flex items-center gap-2 mb-2">
-            <span>🏛️</span>
-            <span className="text-sm font-bold text-white">Публичная казна</span>
-          </div>
-          <div className="text-[10px] text-white/40 mb-2">
-            Все средства хранятся на открытом TON кошелёке. Полная прозрачность.
-          </div>
-          <div className="glass-card p-2.5 rounded-xl mb-2">
-            <div className="text-[10px] text-white/40 mb-0.5">Адрес казны</div>
-            <div className="font-mono text-[9px] text-white/60 break-all">{TREASURY_WALLET_ADDRESS}</div>
-          </div>
-          <a
-            href={`https://tonscan.org/address/${TREASURY_WALLET_ADDRESS}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="block text-center text-[10px] text-blue-400 hover:underline"
-          >
-            Проверить баланс казны в TONScan ↗
-          </a>
         </div>
 
         {/* Stats */}
-        <div className="glass-card p-4">
-          <div className="text-xs font-bold text-white/60 mb-3">📊 Статистика</div>
-          <div className="grid grid-cols-2 gap-2">
-            {[
-              { label: 'Всего ставок', value: totalBets, color: 'text-white' },
-              { label: 'Активных', value: currentUser.activeBets.length, color: 'text-emerald-400' },
-              { label: 'Поставлено TON', value: `${currentUser.totalWagered.toFixed(3)} 💎`, color: 'text-[#0098EA]' },
-              { label: 'Выиграно TON', value: `${currentUser.totalWon.toFixed(3)} 💎`, color: 'text-emerald-400' },
-              { label: 'Репутация', value: `${currentUser.reputation} очков`, color: 'text-purple-400' },
-              { label: 'Голосований', value: currentUser.votedBets.length, color: 'text-blue-400' },
-            ].map((stat) => (
-              <div key={stat.label} className="glass-card p-2.5 rounded-xl">
-                <div className="text-[10px] text-white/40">{stat.label}</div>
-                <div className={`text-sm font-bold mt-0.5 ${stat.color}`}>{stat.value}</div>
-              </div>
-            ))}
-          </div>
+        <div className="grid grid-cols-3 gap-2">
+          {[
+            { label: 'Поставлено', value: `${viewUser.totalWagered.toFixed(1)}`, unit: 'TON', color: 'text-white' },
+            { label: 'Выиграно', value: `${viewUser.totalWon.toFixed(1)}`, unit: 'TON', color: 'text-emerald-400' },
+            { label: 'ROI', value: `${roiPos ? '+' : ''}${roi}`, unit: '%', color: roiPos ? 'text-emerald-400' : 'text-red-400' },
+          ].map(s => (
+            <div key={s.label} className="glass-card p-3 rounded-xl text-center">
+              <p className="text-[9px] text-white/35 mb-1">{s.label}</p>
+              <p className={`text-[15px] font-black ${s.color}`}>{s.value}<span className="text-[10px] ml-0.5 opacity-60">{s.unit}</span></p>
+            </div>
+          ))}
+        </div>
 
-          <div className="mt-3">
-            <div className="flex justify-between text-[10px] text-white/40 mb-1">
-              <span>Прогресс репутации</span>
-              <span>{currentUser.reputation}/1000</span>
-            </div>
-            <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-gradient-to-r from-purple-500 to-blue-500 rounded-full transition-all"
-                style={{ width: `${Math.min(100, (currentUser.reputation / 1000) * 100)}%` }}
-              />
-            </div>
+        {/* Reputation bar */}
+        <div className="glass-card p-3 rounded-xl">
+          <div className="flex justify-between text-[11px] mb-2">
+            <span className="text-white/40">Репутация</span>
+            <span className={rankMeta.color}>{rankMeta.emoji} {rankMeta.label} · {viewUser.reputation}/1000</span>
+          </div>
+          <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
+            <div className="h-full bg-gradient-to-r from-purple-500 to-blue-500 rounded-full transition-all duration-700"
+              style={{ width: `${Math.min(100, viewUser.reputation / 10)}%` }} />
+          </div>
+          <div className="flex justify-between text-[9px] text-white/25 mt-1">
+            <span>Новичок</span><span>Игрок</span><span>Эксперт</span><span>Легенда</span><span>Кит</span>
           </div>
         </div>
 
-        {/* Notifications */}
-        {currentUser.notifications.length > 0 && (
-          <div className="glass-card p-4">
-            <div className="flex items-center gap-2 mb-3">
-              <span className="text-sm font-bold text-white/60">🔔 Уведомления</span>
-              {unreadCount > 0 && (
-                <span className="bg-red-500 text-white text-[9px] font-black w-4 h-4 rounded-full flex items-center justify-center">
-                  {unreadCount}
-                </span>
-              )}
+        {/* TON Domains — own profile only */}
+        {isOwnProfile && (
+          <div className="glass-card p-3 rounded-xl">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[12px] font-bold text-white">💎 TON Домены</span>
+              <button onClick={() => setShowDomainForm(f => !f)}
+                className="text-[10px] text-blue-400 hover:text-blue-300">
+                {showDomainForm ? 'Скрыть' : '+ Привязать'}
+              </button>
             </div>
-            <div className="space-y-2">
-              {currentUser.notifications.slice(0, 6).map((n) => (
-                <div key={n.id} className={`glass-card p-2.5 rounded-xl ${!n.read ? 'border border-purple-500/20' : ''}`}>
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <div className="text-xs font-bold text-white">{n.title}</div>
-                      <div className="text-[10px] text-white/50 mt-0.5">{n.message}</div>
-                    </div>
-                    {!n.read && <span className="w-2 h-2 bg-purple-400 rounded-full flex-shrink-0 mt-1" />}
-                  </div>
+            {currentUser.tonDomains.length === 0 && !showDomainForm && (
+              <p className="text-[11px] text-white/30">Нет привязанных доменов. Привяжи свой .ton домен!</p>
+            )}
+            {currentUser.tonDomains.map(d => (
+              <div key={d.domain} className="flex items-center justify-between mb-1.5">
+                <div className="flex items-center gap-2">
+                  <span className="ton-domain-badge">💎 {d.domain}</span>
+                  {d.verified
+                    ? <span className="text-[10px] text-emerald-400">✓ Верифицирован</span>
+                    : <span className="text-[10px] text-amber-400">⏳ Ожидание</span>}
                 </div>
-              ))}
-            </div>
+                <button onClick={() => unlinkTonDomain(d.domain)}
+                  className="text-[10px] text-red-400/60 hover:text-red-400">✕</button>
+              </div>
+            ))}
+            {showDomainForm && (
+              <div className="mt-2 space-y-2 animate-fadeIn">
+                <input className="glass-input w-full rounded-xl px-3 py-2 text-[12px]"
+                  placeholder="example.ton"
+                  value={domainInput}
+                  onChange={e => setDomainInput(e.target.value)} />
+                {domainError && <p className="text-[10px] text-red-400">{domainError}</p>}
+                {domainSuccess && <p className="text-[10px] text-emerald-400">{domainSuccess}</p>}
+                <button onClick={handleLinkDomain}
+                  className="btn-primary w-full text-white text-[12px] font-bold py-2 rounded-xl">
+                  Привязать домен
+                </button>
+                <p className="text-[9px] text-white/25 text-center">
+                  Для верификации: добавьте TXT-запись flashbet-verify в DNS вашего домена
+                </p>
+              </div>
+            )}
           </div>
         )}
 
-        {/* Recent tx */}
-        {recentTxs.length > 0 && (
-          <div className="glass-card p-4">
-            <div className="text-xs font-bold text-white/60 mb-3">📋 Последние транзакции</div>
-            <div className="space-y-2">
-              {recentTxs.map((tx) => (
-                <div key={tx.id} className="flex items-center justify-between">
-                  <div>
-                    <div className="text-xs text-white">{tx.description}</div>
-                    <div className="text-[9px] text-white/30 flex items-center gap-1">
-                      {new Date(tx.timestamp).toLocaleDateString('ru')}
-                      {tx.txHash && (
-                        <a
-                          href={`https://tonscan.org/tx/${tx.txHash}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-blue-400 hover:underline"
-                        >
-                          #{tx.txHash.slice(0, 8)}↗
-                        </a>
-                      )}
-                      {tx.onChainConfirmed && <span className="text-emerald-400">✓</span>}
-                    </div>
+        {/* Public bet history */}
+        {(isOwnProfile || viewUser.profilePublic) && recentBets.length > 0 && (
+          <div>
+            <p className="text-[10px] text-white/30 font-semibold uppercase tracking-wider mb-2">
+              {isOwnProfile ? '🎯 Мои ставки' : '🎯 Публичные ставки'}
+            </p>
+            {recentBets.map(b => {
+              const userBet = b.participants.find(p => p.userId === viewUser.id);
+              const won = b.outcome && userBet?.side === b.outcome;
+              return (
+                <div key={b.id} className="glass-card px-3 py-2.5 rounded-xl mb-2">
+                  <p className="text-[12px] font-semibold text-white line-clamp-1 mb-1">{b.title}</p>
+                  <div className="flex justify-between text-[10px]">
+                    <span className={userBet?.side === 'yes' ? 'text-emerald-400' : 'text-red-400'}>
+                      {userBet?.side === 'yes' ? 'ДА' : 'НЕТ'} · {userBet?.amount} TON
+                    </span>
+                    <span className={b.status === 'resolved' ? (won ? 'text-emerald-400' : 'text-red-400') : 'text-white/30'}>
+                      {b.status === 'resolved' ? (won ? '🏆 Победа' : '😔 Проигрыш') : '⏳ Активна'}
+                    </span>
                   </div>
-                  <span className={`text-sm font-bold ${tx.type === 'win' ? 'text-emerald-400' : tx.type === 'bet' ? 'text-red-400' : 'text-white'}`}>
-                    {tx.type === 'win' ? '+' : tx.type === 'bet' ? '-' : ''}{tx.amount.toFixed(3)}
-                    <span className="text-[10px] text-[#0098EA] ml-0.5">TON</span>
-                  </span>
                 </div>
-              ))}
-            </div>
+              );
+            })}
           </div>
         )}
 
-        {/* Referral */}
-        <div className="glass-card p-4">
-          <div className="flex items-center gap-2 mb-2">
-            <span>👥</span>
-            <span className="text-sm font-bold text-white">Реферальная программа</span>
+        {!isOwnProfile && !viewUser.profilePublic && (
+          <div className="glass-card p-4 rounded-xl text-center text-white/40 text-sm">
+            🔒 Этот профиль приватный
           </div>
-          <div className="text-[10px] text-white/40 mb-3">
-            Приглашай друзей и получай {SECURITY_CONFIG.REFERRAL_PCT * 100}% от их ставок автоматически!
-          </div>
-          <div className="glass-card p-2.5 rounded-xl mb-2">
-            <div className="text-[10px] text-white/40 mb-1">Ваш реферальный код</div>
-            <div className="text-sm font-bold text-white font-mono">{currentUser.referralCode}</div>
-          </div>
-          <div className="text-[10px] text-white/30">
-            {currentUser.referrals.length} рефералов · {currentUser.referralEarnings.toFixed(3)} TON заработано
-          </div>
-        </div>
+        )}
 
-        {/* Security audit */}
-        <div className="glass-card p-4 border border-purple-500/20">
-          <div className="text-xs font-bold text-white/60 mb-3">🔐 Аудит безопасности</div>
-          <div className="space-y-2 text-[10px]">
-            {[
-              { label: 'isAdmin из localStorage', value: '❌ ЗАПРЕЩЕНО', color: 'text-red-400' },
-              { label: 'Фиктивные данные пулов', value: '❌ УДАЛЕНО', color: 'text-red-400' },
-              { label: 'PoS кворум 66.7%', value: '✅ АКТИВНО', color: 'text-emerald-400' },
-              { label: 'Whale protection 25%', value: '✅ АКТИВНО', color: 'text-emerald-400' },
-              { label: 'Rate limit 5/день', value: '✅ АКТИВНО', color: 'text-emerald-400' },
-              { label: 'Slippage защита 5%', value: '✅ АКТИВНО', color: 'text-emerald-400' },
-              { label: 'Дубликат txHash', value: '✅ ПРОВЕРЯЕТСЯ', color: 'text-emerald-400' },
-              { label: 'XSS санитизация', value: '✅ АКТИВНО', color: 'text-emerald-400' },
-              { label: 'PoS snapshot hash', value: '✅ АКТИВНО', color: 'text-emerald-400' },
-            ].map((item) => (
-              <div key={item.label} className="flex justify-between items-center">
-                <span className="text-white/40">{item.label}</span>
-                <span className={`font-bold ${item.color}`}>{item.value}</span>
+        {/* Notifications — own profile only */}
+        {isOwnProfile && currentUser.notifications.length > 0 && (
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-[10px] text-white/30 font-semibold uppercase tracking-wider">
+                🔔 Уведомления {unreadCount > 0 && <span className="ml-1 bg-red-500 text-white text-[9px] px-1 rounded-full">{unreadCount}</span>}
+              </p>
+            </div>
+            {currentUser.notifications.slice(0, 6).map(n => (
+              <div key={n.id} className="glass-card px-3 py-2.5 rounded-xl mb-1.5 flex items-start justify-between">
+                <div>
+                  <p className="text-[11px] font-semibold text-white">{n.title}</p>
+                  <p className="text-[10px] text-white/50 mt-0.5">{n.message}</p>
+                  <p className="text-[9px] text-white/25 mt-0.5">{formatDistanceToNow(n.timestamp, { locale: ru, addSuffix: true })}</p>
+                </div>
+                {!n.read && <div className="w-1.5 h-1.5 bg-blue-400 rounded-full mt-1 flex-shrink-0" />}
               </div>
             ))}
           </div>
-        </div>
+        )}
+
+        {/* Referral — own profile only */}
+        {isOwnProfile && (
+          <div className="glass-card p-4 rounded-xl">
+            <p className="text-[12px] font-bold text-white mb-2">👥 Реферальная программа</p>
+            <p className="text-[11px] text-white/50 mb-3">
+              Приглашай друзей и получай {SECURITY_CONFIG.REFERRAL_PCT * 100}% от их ставок автоматически
+            </p>
+            <div className="glass px-3 py-2 rounded-xl flex items-center justify-between">
+              <span className="text-[11px] text-white/40">Ваш код</span>
+              <span className="text-[13px] font-black text-purple-400 tracking-wider">{currentUser.referralCode}</span>
+            </div>
+            <div className="flex justify-between text-[11px] text-white/40 mt-2">
+              <span>{currentUser.referrals.length} рефералов</span>
+              <span className="text-emerald-400">{currentUser.referralEarnings.toFixed(3)} TON заработано</span>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
