@@ -1,86 +1,140 @@
-import { useMemo } from 'react';
 import { useStore } from '../store/useStore';
-import { SECURITY_CONFIG } from '../security/proofOfStake';
 import { formatDistanceToNow } from 'date-fns';
 import { ru } from 'date-fns/locale';
 
+const PLATFORM_FEE = 0.02;
+
 export function Portfolio() {
-  const { currentUser, bets, transactions, setSelectedBetId, setActiveTab } = useStore();
+  const { bets, currentUser, setSelectedBetId, setActiveTab, tonWalletAddress } = useStore();
 
-  const activeBetObjects = useMemo(() =>
-    bets.filter(b => currentUser.activeBets.includes(b.id)),
-    [bets, currentUser.activeBets]
+  const myBets = bets.filter(b =>
+    b.participants.some(p => p.userId === currentUser.id)
   );
 
-  const resolvedBetObjects = useMemo(() =>
-    bets.filter(b => currentUser.resolvedBets.includes(b.id)).slice(0, 10),
-    [bets, currentUser.resolvedBets]
-  );
+  const activeBets = myBets.filter(b => b.status === 'active');
+  const resolvedBets = myBets.filter(b => b.status === 'resolved' || b.status === 'cancelled');
 
-  const myTxs = transactions.filter(t => t.userId === currentUser.id).slice(0, 15);
-  const roi = currentUser.totalWagered > 0
-    ? ((currentUser.totalWon - currentUser.totalWagered) / currentUser.totalWagered * 100).toFixed(1)
-    : '0.0';
+  // Calculate stats from real bets
+  const totalWagered = currentUser.totalWagered;
+  const totalWon = currentUser.totalWon;
+  const pnl = totalWon - totalWagered;
+  const roi = totalWagered > 0 ? ((pnl / totalWagered) * 100).toFixed(1) : '0.0';
   const roiPos = parseFloat(roi) >= 0;
 
+  // Active positions with current unrealized value
+  const activePositions = activeBets.map(bet => {
+    const myParticipations = bet.participants.filter(p => p.userId === currentUser.id);
+    const invested = myParticipations.reduce((s, p) => s + p.amount, 0);
+    const side = myParticipations[0]?.side;
+    const currentProb = side === 'yes' ? bet.yesPrice : bet.noPrice;
+    const shares = myParticipations.reduce((s, p) => s + p.shares, 0);
+    const currentValue = shares * currentProb * (1 - PLATFORM_FEE);
+    return { bet, invested, currentValue, side, shares };
+  });
+
+  const unrealizedPnl = activePositions.reduce((s, p) => s + (p.currentValue - p.invested), 0);
+
+  if (!tonWalletAddress && myBets.length === 0) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100%', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+        <div style={{ fontSize: 48, marginBottom: 16 }}>💼</div>
+        <h2 style={{ color: '#f1f5f9', marginBottom: 8, fontSize: 18, textAlign: 'center' }}>Ваш портфель пуст</h2>
+        <p style={{ color: '#64748b', textAlign: 'center', fontSize: 13, marginBottom: 24 }}>
+          Подключите кошелёк и сделайте первую ставку
+        </p>
+        <button
+          className="btn-primary"
+          style={{ padding: '10px 24px', fontSize: 14 }}
+          onClick={() => setActiveTab('bets')}
+        >
+          Перейти к рынкам
+        </button>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex flex-col h-full bg-mesh">
-      <div className="flex-shrink-0 px-4 pt-4 pb-2">
-        <h1 className="text-xl font-black text-white mb-1">Портфель</h1>
-        <p className="text-[11px] text-white/40">Ваши ставки и история</p>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div style={{ padding: '16px 16px 12px', flexShrink: 0 }}>
+        <h1 style={{ fontSize: 18, fontWeight: 800, color: '#f1f5f9', margin: 0 }}>Портфель</h1>
       </div>
 
-      <div className="flex-1 overflow-y-auto scroll-content px-4 pb-4 space-y-3">
+      <div className="scroll-area" style={{ flex: 1, padding: '0 16px 16px' }}>
         {/* Stats */}
-        <div className="grid grid-cols-2 gap-2">
-          {[
-            { label: 'Поставлено', value: `${currentUser.totalWagered.toFixed(2)} TON`, color: 'text-white', sub: '' },
-            { label: 'Выиграно', value: `${currentUser.totalWon.toFixed(2)} TON`, color: 'text-emerald-400', sub: '' },
-            { label: 'ROI', value: `${roiPos ? '+' : ''}${roi}%`, color: roiPos ? 'text-emerald-400' : 'text-red-400', sub: '' },
-            { label: 'Репутация', value: `${currentUser.reputation}`, color: 'text-purple-400', sub: `+5 за голос` },
-          ].map(s => (
-            <div key={s.label} className="glass-card p-3 rounded-xl">
-              <p className="text-[10px] text-white/40 mb-1">{s.label}</p>
-              <p className={`text-base font-black ${s.color}`}>{s.value}</p>
-              {s.sub && <p className="text-[10px] text-white/30">{s.sub}</p>}
+        <div className="glass-card" style={{ padding: 16, marginBottom: 12 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, textAlign: 'center' }}>
+            <div>
+              <div className="stat-value">{totalWagered.toFixed(1)}</div>
+              <div className="stat-label">TON вложено</div>
             </div>
-          ))}
-        </div>
-
-        {/* Fee breakdown */}
-        <div className="glass-card p-3 rounded-xl">
-          <p className="text-[10px] text-white/40 mb-2 font-semibold uppercase tracking-wider">Структура платежей</p>
-          <div className="space-y-1">
-            {[
-              { label: 'Победителям', pct: `${(1 - SECURITY_CONFIG.PLATFORM_FEE_PCT - SECURITY_CONFIG.VALIDATOR_REWARD_PCT - SECURITY_CONFIG.REFERRAL_PCT) * 100}%`, color: 'bg-emerald-500' },
-              { label: 'Платформа', pct: `${SECURITY_CONFIG.PLATFORM_FEE_PCT * 100}%`, color: 'bg-purple-500' },
-              { label: 'Валидаторы PoS', pct: `${SECURITY_CONFIG.VALIDATOR_REWARD_PCT * 100}%`, color: 'bg-blue-500' },
-              { label: 'Рефералы', pct: `${SECURITY_CONFIG.REFERRAL_PCT * 100}%`, color: 'bg-amber-500' },
-            ].map(f => (
-              <div key={f.label} className="flex items-center gap-2">
-                <div className={`w-2 h-2 rounded-full ${f.color}`} />
-                <span className="text-[11px] text-white/60 flex-1">{f.label}</span>
-                <span className="text-[11px] font-bold text-white">{f.pct}</span>
+            <div>
+              <div className="stat-value" style={{ color: roiPos ? '#22c55e' : '#ef4444' }}>
+                {roiPos ? '+' : ''}{roi}%
               </div>
-            ))}
+              <div className="stat-label">ROI</div>
+            </div>
+            <div>
+              <div className="stat-value">{myBets.length}</div>
+              <div className="stat-label">Ставок</div>
+            </div>
           </div>
+
+          {unrealizedPnl !== 0 && (
+            <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid rgba(255,255,255,0.05)',
+                          display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+              <span style={{ color: '#64748b' }}>Нереализованный P&L</span>
+              <span style={{ color: unrealizedPnl >= 0 ? '#22c55e' : '#ef4444', fontWeight: 700 }}>
+                {unrealizedPnl >= 0 ? '+' : ''}{unrealizedPnl.toFixed(2)} TON
+              </span>
+            </div>
+          )}
         </div>
 
-        {/* Active bets */}
-        {activeBetObjects.length > 0 && (
-          <div>
-            <p className="text-[10px] text-white/30 font-semibold uppercase tracking-wider mb-2">⚡ Активные ставки</p>
-            {activeBetObjects.map(b => {
-              const myBet = b.participants.find(p => p.userId === currentUser.id);
+        {/* Active positions */}
+        {activePositions.length > 0 && (
+          <div style={{ marginBottom: 12 }}>
+            <div className="section-label" style={{ marginBottom: 8 }}>Активные позиции</div>
+            {activePositions.map(({ bet, invested, currentValue, side }) => {
+              const yesPct = Math.round(bet.yesPrice * 100);
+              const pnlItem = currentValue - invested;
               return (
-                <div key={b.id} className="glass-card p-3 rounded-xl mb-2 cursor-pointer bet-card"
-                  onClick={() => { setSelectedBetId(b.id); setActiveTab('bets'); }}>
-                  <p className="text-[12px] font-bold text-white line-clamp-1 mb-1">{b.title}</p>
-                  <div className="flex justify-between text-[10px]">
-                    <span className={myBet?.side === 'yes' ? 'text-emerald-400' : 'text-red-400'}>
-                      {myBet?.side === 'yes' ? '✅ ДА' : '❌ НЕТ'} · {myBet?.amount} TON
-                    </span>
-                    <span className="text-white/30">⏱ {formatDistanceToNow(b.resolveAt, { locale: ru, addSuffix: true })}</span>
+                <div key={bet.id} className="market-card" style={{ padding: '12px 14px', marginBottom: 8 }}
+                     onClick={() => { setSelectedBetId(bet.id); setActiveTab('bets'); }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: '#f1f5f9', marginBottom: 8, lineHeight: 1.3 }}
+                       className="line-clamp-2">
+                    {bet.title}
+                  </div>
+
+                  <div style={{ display: 'flex', height: 4, borderRadius: 3, overflow: 'hidden', gap: 1, marginBottom: 6 }}>
+                    <div className="prob-bar-yes" style={{ width: `${yesPct}%` }} />
+                    <div className="prob-bar-no" style={{ width: `${100 - yesPct}%` }} />
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 4, fontSize: 11 }}>
+                    <div>
+                      <div style={{ color: '#475569' }}>Позиция</div>
+                      <div style={{ color: side === 'yes' ? '#22c55e' : '#ef4444', fontWeight: 700 }}>
+                        {side === 'yes' ? 'ДА' : 'НЕТ'}
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ color: '#475569' }}>Вложено</div>
+                      <div style={{ color: '#f1f5f9', fontWeight: 600 }}>{invested.toFixed(2)}</div>
+                    </div>
+                    <div>
+                      <div style={{ color: '#475569' }}>Тек. стоим.</div>
+                      <div style={{ color: '#f1f5f9', fontWeight: 600 }}>{currentValue.toFixed(2)}</div>
+                    </div>
+                    <div>
+                      <div style={{ color: '#475569' }}>P&L</div>
+                      <div style={{ color: pnlItem >= 0 ? '#22c55e' : '#ef4444', fontWeight: 700 }}>
+                        {pnlItem >= 0 ? '+' : ''}{pnlItem.toFixed(2)}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ marginTop: 6, fontSize: 10, color: '#475569' }}>
+                    ⏱ {formatDistanceToNow(bet.resolveAt, { locale: ru, addSuffix: true })}
                   </div>
                 </div>
               );
@@ -89,20 +143,35 @@ export function Portfolio() {
         )}
 
         {/* Resolved */}
-        {resolvedBetObjects.length > 0 && (
+        {resolvedBets.length > 0 && (
           <div>
-            <p className="text-[10px] text-white/30 font-semibold uppercase tracking-wider mb-2">✓ Завершённые</p>
-            {resolvedBetObjects.map(b => {
-              const myBet = b.participants.find(p => p.userId === currentUser.id);
-              const won = myBet?.side === b.outcome;
+            <div className="section-label" style={{ marginBottom: 8 }}>История</div>
+            {resolvedBets.map(bet => {
+              const myP = bet.participants.filter(p => p.userId === currentUser.id);
+              const invested = myP.reduce((s, p) => s + p.amount, 0);
+              const side = myP[0]?.side;
+              const won = bet.status === 'resolved' && bet.outcome === side;
+
               return (
-                <div key={b.id} className="glass-card p-3 rounded-xl mb-2">
-                  <p className="text-[12px] font-bold text-white line-clamp-1 mb-1">{b.title}</p>
-                  <div className="flex justify-between text-[10px]">
-                    <span className={won ? 'text-emerald-400' : 'text-red-400'}>
-                      {won ? '🏆 Победа' : '😔 Проигрыш'} · {myBet?.side === 'yes' ? 'ДА' : 'НЕТ'}
-                    </span>
-                    <span className="text-white/30">Итог: {b.outcome === 'yes' ? 'ДА' : 'НЕТ'}</span>
+                <div key={bet.id} className="glass-card" style={{ padding: '10px 14px', marginBottom: 8,
+                                                                    display: 'flex', justifyContent: 'space-between',
+                                                                    alignItems: 'center' }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.3 }} className="line-clamp-1">
+                      {bet.title}
+                    </div>
+                    <div style={{ fontSize: 10, color: '#475569', marginTop: 2 }}>
+                      {side === 'yes' ? 'ДА' : 'НЕТ'} · {invested.toFixed(2)} TON
+                    </div>
+                  </div>
+                  <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                    {bet.status === 'resolved' ? (
+                      <span style={{ fontSize: 12, fontWeight: 700, color: won ? '#22c55e' : '#ef4444' }}>
+                        {won ? '✓ Победа' : '✗ Проигрыш'}
+                      </span>
+                    ) : (
+                      <span style={{ fontSize: 11, color: '#64748b' }}>Отменено</span>
+                    )}
                   </div>
                 </div>
               );
@@ -110,34 +179,13 @@ export function Portfolio() {
           </div>
         )}
 
-        {/* Transactions */}
-        {myTxs.length > 0 && (
-          <div>
-            <p className="text-[10px] text-white/30 font-semibold uppercase tracking-wider mb-2">📋 Транзакции</p>
-            {myTxs.map(tx => (
-              <div key={tx.id} className="glass-card px-3 py-2.5 rounded-xl mb-1.5 flex items-center justify-between">
-                <div>
-                  <p className="text-[11px] text-white font-medium line-clamp-1">{tx.description}</p>
-                  <div className="flex items-center gap-2 text-[10px] text-white/30 mt-0.5">
-                    <span>{new Date(tx.timestamp).toLocaleDateString('ru')}</span>
-                    {tx.txHash && <span className="text-blue-400/60">#{tx.txHash.slice(0,8)}...</span>}
-                    {tx.onChainConfirmed && <span className="text-emerald-400/60">✓ on-chain</span>}
-                  </div>
-                </div>
-                <span className={`text-[12px] font-bold ${tx.type === 'win' ? 'text-emerald-400' : tx.type === 'bet' ? 'text-white/60' : 'text-blue-400'}`}>
-                  {tx.type === 'win' ? '+' : tx.type === 'bet' ? '-' : ''}{tx.amount.toFixed(3)} TON
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {activeBetObjects.length === 0 && resolvedBetObjects.length === 0 && (
-          <div className="text-center py-12">
-            <div className="text-4xl mb-3">🎯</div>
-            <p className="text-white/40 text-sm mb-4">Ставок пока нет</p>
-            <button onClick={() => setActiveTab('bets')} className="btn-primary text-white text-sm font-bold px-5 py-2.5 rounded-xl">
-              Перейти к ставкам
+        {myBets.length === 0 && (
+          <div style={{ textAlign: 'center', padding: '40px 0', color: '#475569' }}>
+            <div style={{ fontSize: 40, marginBottom: 12 }}>📊</div>
+            <p>Ставок пока нет</p>
+            <button className="btn-primary" style={{ marginTop: 12, padding: '8px 20px', fontSize: 13 }}
+                    onClick={() => setActiveTab('bets')}>
+              Найти рынок
             </button>
           </div>
         )}

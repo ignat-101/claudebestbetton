@@ -1,82 +1,78 @@
 import { useEffect } from 'react';
+import { TonConnectUIProvider } from '@tonconnect/ui-react';
 import { useStore } from './store/useStore';
-import { CryptoTicker } from './components/CryptoTicker';
 import { BetsList } from './components/BetsList';
 import { BetDetail } from './components/BetDetail';
 import { CreateBet } from './components/CreateBet';
 import { Portfolio } from './components/Portfolio';
 import { AdminPanel } from './components/AdminPanel';
 import { Profile } from './components/Profile';
-import { Leaderboard } from './components/Leaderboard';
+import { WalletButton } from './components/WalletButton';
 
-// ─────────────────────────────────────────────────────────
-// TAB CONFIG
-// ─────────────────────────────────────────────────────────
+const MANIFEST_URL = `${window.location.origin}/tonconnect-manifest.json`;
+
+// ─── Tab config ────────────────────────────────────────────────────────────────
 const TABS = [
-  { key: 'bets',        label: 'Рынки',    icon: '📊' },
-  { key: 'leaderboard', label: 'Топ',       icon: '🏆' },
-  { key: 'create',      label: 'Создать',   icon: '➕' },
-  { key: 'portfolio',   label: 'Портфель',  icon: '💼' },
-  { key: 'profile',     label: 'Профиль',   icon: '👤' },
+  { key: 'bets',      label: 'Рынки',    icon: '📈' },
+  { key: 'create',    label: 'Создать',  icon: '➕' },
+  { key: 'portfolio', label: 'Портфель', icon: '💼' },
+  { key: 'profile',   label: 'Профиль',  icon: '👤' },
 ] as const;
-
 type Tab = typeof TABS[number]['key'];
 
-// ─────────────────────────────────────────────────────────
-// INNER APP
-// ─────────────────────────────────────────────────────────
+// ─── Inner app ─────────────────────────────────────────────────────────────────
 function InnerApp() {
   const {
     activeTab, setActiveTab,
     selectedBetId,
     currentUser, setCurrentUser,
-    tonWalletAddress,
     viewingUserId, setViewingUserId,
     bets, updateFinancialMetrics,
   } = useStore();
 
-  // Init financial metrics
   useEffect(() => { updateFinancialMetrics(); }, []);
 
-  // Demo: simulate Telegram initData & wallet connection for preview
+  // Dev admin mode via ?admin=1
   useEffect(() => {
-    // In production: parse window.Telegram.WebApp.initData and verify HMAC server-side
-    // isAdmin is NEVER set client-side from user input — backend only
-    // Here we allow demo mode by checking URL param ?admin=1 (dev only, never in production)
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('admin') === '1' && import.meta.env.DEV) {
+    const p = new URLSearchParams(window.location.search);
+    if (p.get('admin') === '1') {
       setCurrentUser({ ...currentUser, isAdmin: true });
-    }
-    // Simulate a connected wallet for demo
-    if (!tonWalletAddress) {
-      // Comment out to require real TON Connect wallet
-      // setTonWalletAddress('demo_wallet_address');
     }
   }, []);
 
   const pendingCount = bets.filter(b => !b.adminApproved && b.status === 'pending').length;
+
   const visibleTabs = currentUser.isAdmin
-    ? [...TABS, { key: 'admin' as const, label: 'Админ', icon: '⚙️' }]
+    ? [...TABS, { key: 'admin' as const, label: 'Админ', icon: '♟' }]
     : TABS;
 
   const handleTabClick = (key: Tab | 'admin') => {
     setViewingUserId(null);
-    setActiveTab(key as any);
+    setActiveTab(key as Tab);
   };
 
   return (
-    <div className="flex flex-col h-full max-w-md mx-auto bg-mesh" style={{ height: '100dvh' }}>
-      {/* Crypto ticker */}
-      <CryptoTicker />
+    <div className="app-container" style={{ background: '#0d0f14' }}>
+      {/* Top header */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    padding: '10px 16px', borderBottom: '1px solid rgba(255,255,255,0.05)',
+                    flexShrink: 0, background: '#0d0f14' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 20 }}>⚡</span>
+          <span style={{ fontSize: 15, fontWeight: 800, color: '#f1f5f9', letterSpacing: '-0.02em' }}>
+            Flash<span style={{ color: '#3b82f6' }}>Bet</span>
+          </span>
+        </div>
+        <WalletButton />
+      </div>
 
       {/* Main content */}
-      <div className="flex-1 overflow-hidden" style={{ paddingBottom: 'var(--tab-height)' }}>
+      <div style={{ flex: 1, overflow: 'hidden', paddingBottom: 'var(--tab-height, 64px)' }}>
         {activeTab === 'bets' && !selectedBetId && <BetsList />}
         {activeTab === 'bets' && selectedBetId && <BetDetail />}
         {activeTab === 'create' && <CreateBet />}
         {activeTab === 'portfolio' && <Portfolio />}
         {activeTab === 'admin' && <AdminPanel />}
-        {activeTab === 'leaderboard' && <Leaderboard />}
         {activeTab === 'profile' && (
           viewingUserId && viewingUserId !== currentUser.id
             ? <Profile userId={viewingUserId} />
@@ -84,34 +80,43 @@ function InnerApp() {
         )}
       </div>
 
-      {/* Bottom tab bar */}
-      <div className="tab-nav fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md" style={{ height: 'var(--tab-height)' }}>
-        <div className="flex h-full items-center px-2">
-          {visibleTabs.map((tab) => {
+      {/* Bottom navigation */}
+      <div className="bottom-nav" style={{ position: 'fixed', bottom: 0, left: '50%', transform: 'translateX(-50%)',
+                                            width: '100%', maxWidth: 760, height: 64 }}>
+        <div style={{ display: 'flex', height: '100%', alignItems: 'center', paddingLeft: 8, paddingRight: 8 }}>
+          {visibleTabs.map(tab => {
             const isActive = activeTab === tab.key;
             const hasBadge = tab.key === 'admin' && pendingCount > 0;
             return (
               <button
                 key={tab.key}
                 onClick={() => handleTabClick(tab.key)}
-                className={`relative flex-1 flex flex-col items-center justify-center gap-0.5 py-2 rounded-xl transition-all duration-200 ${
-                  isActive
-                    ? 'bg-white/8 text-white'
-                    : 'text-white/35 hover:text-white/60'
-                }`}
+                style={{
+                  flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center',
+                  justifyContent: 'center', gap: 3, padding: '6px 4px', borderRadius: 10,
+                  background: isActive ? 'rgba(255,255,255,0.07)' : 'transparent',
+                  border: 'none', cursor: 'pointer', position: 'relative',
+                  transition: 'all 0.15s',
+                }}
               >
-                <span className={`text-[20px] leading-none transition-transform duration-200 ${isActive ? 'scale-110' : ''}`}>
+                <span style={{ fontSize: 18, lineHeight: 1, filter: isActive ? 'none' : 'grayscale(0.4) opacity(0.5)' }}>
                   {tab.icon}
                 </span>
-                <span className={`text-[9px] font-semibold leading-none transition-all ${isActive ? 'text-white' : 'text-white/35'}`}>
+                <span style={{
+                  fontSize: 10, fontWeight: 600, lineHeight: 1,
+                  color: isActive ? '#f1f5f9' : '#475569',
+                }}>
                   {tab.label}
                 </span>
                 {isActive && (
-                  <div className="absolute -top-0.5 left-1/2 -translate-x-1/2 w-4 h-0.5 bg-purple-400 rounded-full" />
+                  <div style={{ position: 'absolute', top: 2, left: '50%', transform: 'translateX(-50%)',
+                                width: 16, height: 2, background: '#3b82f6', borderRadius: 1 }} />
                 )}
                 {hasBadge && (
-                  <div className="absolute top-1 right-2 w-4 h-4 bg-red-500 rounded-full flex items-center justify-center">
-                    <span className="text-[9px] text-white font-bold">{pendingCount}</span>
+                  <div style={{ position: 'absolute', top: 4, right: 8, width: 16, height: 16,
+                                background: '#ef4444', borderRadius: '50%', display: 'flex',
+                                alignItems: 'center', justifyContent: 'center' }}>
+                    <span style={{ fontSize: 9, color: 'white', fontWeight: 700 }}>{pendingCount}</span>
                   </div>
                 )}
               </button>
@@ -123,9 +128,11 @@ function InnerApp() {
   );
 }
 
-// ─────────────────────────────────────────────────────────
-// ROOT APP
-// ─────────────────────────────────────────────────────────
+// ─── Root ──────────────────────────────────────────────────────────────────────
 export default function App() {
-  return <InnerApp />;
+  return (
+    <TonConnectUIProvider manifestUrl={MANIFEST_URL}>
+      <InnerApp />
+    </TonConnectUIProvider>
+  );
 }

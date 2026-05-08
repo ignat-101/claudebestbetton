@@ -1,7 +1,7 @@
 {
-  "url": "https://flashbet-tma.onrender.com",
-  "name": "TON FlashBet",
-  "iconUrl": "https://flashbet-tma.onrender.com/icon.png",
-  "termsOfUseUrl": "https://flashbet-tma.onrender.com/terms",
-  "privacyPolicyUrl": "https://flashbet-tma.onrender.com/privacy"
+  "url": "https://flashbet-ton.netlify.app",
+  "name": "FlashBet TON",
+  "iconUrl": "https://flashbet-ton.netlify.app/icon.png",
+  "termsOfUseUrl": "https://flashbet-ton.netlify.app/terms",
+  "privacyPolicyUrl": "https://flashbet-ton.netlify.app/privacy"
 }

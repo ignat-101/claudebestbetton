@@ -2,17 +2,18 @@ import { useMemo } from 'react';
 import { useStore, type BetCategory } from '../store/useStore';
 import { BetCard } from './BetCard';
 
-const CATEGORIES: { key: BetCategory | 'all'; label: string; emoji: string }[] = [
-  { key: 'all',      label: 'Все',      emoji: '🌐' },
-  { key: 'crypto',   label: 'Крипто',   emoji: '₿' },
-  { key: 'sports',   label: 'Спорт',    emoji: '⚽' },
-  { key: 'politics', label: 'Политика', emoji: '🏛' },
-  { key: 'news',     label: 'Новости',  emoji: '📰' },
-  { key: 'custom',   label: 'Другое',   emoji: '✨' },
+const CATEGORIES: { key: BetCategory | 'all'; label: string }[] = [
+  { key: 'all', label: 'Все' },
+  { key: 'crypto', label: '₿ Крипто' },
+  { key: 'sports', label: '⚽ Спорт' },
+  { key: 'politics', label: '🏛 Политика' },
+  { key: 'news', label: '📰 Новости' },
+  { key: 'custom', label: '✨ Другое' },
 ];
 
 export function BetsList() {
-  const { bets, filterCategory, setFilterCategory, searchQuery, setSearchQuery, setSelectedBetId, setActiveTab } = useStore();
+  const { bets, filterCategory, setFilterCategory, searchQuery, setSearchQuery,
+          setSelectedBetId, setActiveTab } = useStore();
 
   const filtered = useMemo(() => {
     let list = bets.filter(b => b.adminApproved && b.status !== 'cancelled');
@@ -30,7 +31,7 @@ export function BetsList() {
       if (!a.featured && b.featured) return 1;
       if (a.status === 'active' && b.status !== 'active') return -1;
       if (a.status !== 'active' && b.status === 'active') return 1;
-      return b.createdAt - a.createdAt;
+      return b.totalVolume - a.totalVolume;
     });
   }, [bets, filterCategory, searchQuery]);
 
@@ -38,17 +39,20 @@ export function BetsList() {
   const regular = filtered.filter(b => !(b.featured && b.status === 'active'));
 
   return (
-    <div className="flex flex-col h-full bg-mesh">
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* Header */}
-      <div className="flex-shrink-0 px-4 pt-4 pb-2">
-        <div className="flex items-center justify-between mb-3">
+      <div style={{ padding: '16px 16px 12px', flexShrink: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
           <div>
-            <h1 className="text-xl font-black text-white tracking-tight">FlashBet <span className="ton-color">TON</span></h1>
-            <p className="text-[11px] text-white/40 mt-0.5">Децентрализованные прогнозы · PoS защита</p>
+            <h1 style={{ fontSize: 20, fontWeight: 800, color: '#f1f5f9', margin: 0 }}>
+              FlashBet <span style={{ color: '#3b82f6' }}>TON</span>
+            </h1>
+            <p style={{ fontSize: 11, color: '#475569', margin: 0 }}>Рынок предсказаний на блокчейне TON</p>
           </div>
           <button
             onClick={() => setActiveTab('create')}
-            className="btn-primary text-white text-[11px] font-bold px-3 py-1.5 rounded-xl"
+            className="btn-primary"
+            style={{ padding: '7px 14px', fontSize: 13 }}
           >
             + Создать
           </button>
@@ -56,62 +60,60 @@ export function BetsList() {
 
         {/* Search */}
         <input
-          className="glass-input w-full rounded-xl px-3 py-2 text-[13px] mb-3"
-          placeholder="🔍 Поиск ставок..."
+          className="search-input"
+          placeholder="🔍 Поиск событий..."
           value={searchQuery}
           onChange={e => setSearchQuery(e.target.value)}
+          style={{ marginBottom: 10 }}
         />
 
         {/* Categories */}
-        <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
+        <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 2 }}
+             className="hide-scroll">
           {CATEGORIES.map(cat => (
             <button
               key={cat.key}
+              className={`cat-chip ${filterCategory === cat.key ? 'active' : ''}`}
               onClick={() => setFilterCategory(cat.key)}
-              className={`chip flex-shrink-0 ${filterCategory === cat.key ? 'active' : ''}`}
             >
-              {cat.emoji} {cat.label}
+              {cat.label}
             </button>
           ))}
         </div>
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto scroll-content px-4 pb-4 space-y-3">
-        {/* Featured */}
+      <div className="scroll-area" style={{ flex: 1, padding: '0 16px 16px' }}>
         {featured.length > 0 && (
-          <div>
-            <div className="text-[10px] text-white/30 font-semibold uppercase tracking-widest mb-2 mt-1">⭐ Топ рынки</div>
-            {featured.map(bet => (
-              <div key={bet.id} className="mb-3">
-                <BetCard bet={bet} onClick={() => setSelectedBetId(bet.id)} />
-              </div>
-            ))}
+          <div style={{ marginBottom: 16 }}>
+            <div className="section-label" style={{ marginBottom: 8 }}>🔥 Популярные</div>
+            <div className="markets-grid" style={{ display: 'grid', gap: 10 }}>
+              {featured.map(bet => (
+                <BetCard key={bet.id} bet={bet} onClick={() => setSelectedBetId(bet.id)} />
+              ))}
+            </div>
           </div>
         )}
 
-        {/* Regular */}
         {regular.length > 0 && (
           <div>
             {featured.length > 0 && (
-              <div className="text-[10px] text-white/30 font-semibold uppercase tracking-widest mb-2">Все ставки</div>
+              <div className="section-label" style={{ marginBottom: 8 }}>Все рынки</div>
             )}
-            {regular.map(bet => (
-              <div key={bet.id} className="mb-3">
-                <BetCard bet={bet} onClick={() => setSelectedBetId(bet.id)} />
-              </div>
-            ))}
+            <div style={{ display: 'grid', gap: 10 }}>
+              {regular.map(bet => (
+                <BetCard key={bet.id} bet={bet} onClick={() => setSelectedBetId(bet.id)} />
+              ))}
+            </div>
           </div>
         )}
 
         {filtered.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-16 text-center">
-            <div className="text-4xl mb-3">🔍</div>
-            <p className="text-white/40 text-sm">Ставок не найдено</p>
-            <button
-              className="mt-4 btn-primary text-white text-sm font-bold px-4 py-2 rounded-xl"
-              onClick={() => { setFilterCategory('all'); setSearchQuery(''); }}
-            >
+          <div style={{ textAlign: 'center', padding: '60px 0', color: '#475569' }}>
+            <div style={{ fontSize: 40, marginBottom: 12 }}>🔍</div>
+            <p style={{ marginBottom: 16 }}>Ничего не найдено</p>
+            <button className="btn-primary" style={{ padding: '8px 20px' }}
+              onClick={() => { setFilterCategory('all'); setSearchQuery(''); }}>
               Сбросить фильтры
             </button>
           </div>

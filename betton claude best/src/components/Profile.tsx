@@ -1,33 +1,28 @@
 import { useState } from 'react';
 import { useStore, RANK_META, computeRank, DEMO_USERS } from '../store/useStore';
-import { SECURITY_CONFIG } from '../security/proofOfStake';
 import { formatDistanceToNow } from 'date-fns';
 import { ru } from 'date-fns/locale';
 
-interface Props {
-  /** If set, show this user's PUBLIC profile (read-only). Null = own profile. */
-  userId?: string | null;
-}
+interface Props { userId?: string | null; }
+
+const AVATARS = ['🎯', '🐋', '🌙', '🦁', '🐯', '⭐', '🦊', '🎲', '💎', '🚀', '🏆', '🎭'];
 
 export function Profile({ userId }: Props) {
-  const { currentUser, setCurrentUser, bets, linkTonDomain, unlinkTonDomain, setViewingUserId, setActiveTab } = useStore();
+  const { currentUser, setCurrentUser, bets, loadDomainsFromWallet,
+          setViewingUserId, setActiveTab, tonWalletAddress } = useStore();
 
-  // Resolve which user to display
-  const isOwnProfile = !userId || userId === currentUser.id;
+  const isOwn = !userId || userId === currentUser.id;
   const demoUser = DEMO_USERS.find(u => u.id === userId);
-  const viewUser = isOwnProfile ? currentUser : (demoUser ? { ...demoUser, isAdmin: false, notifications: [] } : null);
+  const viewUser = isOwn ? currentUser : (demoUser ? { ...demoUser, isAdmin: false, notifications: [] } : null);
 
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState({ username: currentUser.username, bio: currentUser.bio ?? '', avatar: currentUser.avatar });
-  const [domainInput, setDomainInput] = useState('');
-  const [domainError, setDomainError] = useState('');
-  const [domainSuccess, setDomainSuccess] = useState('');
-  const [showDomainForm, setShowDomainForm] = useState(false);
+  const [loadingDomains, setLoadingDomains] = useState(false);
 
   if (!viewUser) {
     return (
-      <div className="flex flex-col items-center justify-center h-full text-white/40">
-        <div className="text-4xl mb-3">👤</div>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#475569' }}>
+        <div style={{ fontSize: 48, marginBottom: 12 }}>👤</div>
         <p>Пользователь не найден</p>
       </div>
     );
@@ -35,16 +30,14 @@ export function Profile({ userId }: Props) {
 
   const rank = computeRank(viewUser.reputation);
   const rankMeta = RANK_META[rank];
-  const myBets = isOwnProfile
-    ? bets.filter(b => b.participants.some(p => p.userId === viewUser.id))
-    : bets.filter(b => viewUser.profilePublic && b.participants.some(p => p.userId === viewUser.id));
-
-  const recentBets = myBets.slice(0, 5);
+  const myBets = bets.filter(b =>
+    b.participants.some(p => p.userId === viewUser.id) &&
+    (isOwn || viewUser.profilePublic)
+  );
   const roi = viewUser.totalWagered > 0
     ? ((viewUser.totalWon - viewUser.totalWagered) / viewUser.totalWagered * 100).toFixed(1)
     : '0.0';
   const roiPos = parseFloat(roi) >= 0;
-  const unreadCount = isOwnProfile ? currentUser.notifications.filter(n => !n.read).length : 0;
 
   const saveEdit = () => {
     setCurrentUser({
@@ -56,65 +49,63 @@ export function Profile({ userId }: Props) {
     setEditing(false);
   };
 
-  const handleLinkDomain = () => {
-    setDomainError('');
-    setDomainSuccess('');
-    const result = linkTonDomain(domainInput);
-    if (result.ok) {
-      setDomainSuccess(`✅ ${domainInput} привязан! Верификация через TON DNS займёт ~5 мин.`);
-      setDomainInput('');
-      setTimeout(() => { setDomainSuccess(''); setShowDomainForm(false); }, 3000);
-    } else {
-      setDomainError(result.error ?? 'Ошибка');
-    }
+  const handleLoadDomains = async () => {
+    if (!tonWalletAddress) return;
+    setLoadingDomains(true);
+    await loadDomainsFromWallet(tonWalletAddress);
+    setLoadingDomains(false);
   };
 
-  const AVATARS = ['🎯', '🐺', '🐳', '🧙', '🌙', '⚔️', '🦊', '🦁', '🐉', '🤖', '👾', '🎭'];
-
   return (
-    <div className="flex flex-col h-full bg-mesh">
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* Header */}
-      <div className="flex-shrink-0 px-4 pt-4 pb-2">
-        {!isOwnProfile && (
-          <button onClick={() => { setViewingUserId(null); setActiveTab('leaderboard'); }}
-            className="flex items-center gap-1.5 text-white/50 text-[12px] mb-3 hover:text-white transition-colors">
+      <div style={{ padding: '16px 16px 12px', flexShrink: 0 }}>
+        {!isOwn && (
+          <button onClick={() => { setViewingUserId(null); setActiveTab('bets'); }}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#64748b',
+                           fontSize: 13, marginBottom: 10, cursor: 'pointer', background: 'none', border: 'none', padding: 0 }}>
             ← Назад
           </button>
         )}
-        <h1 className="text-xl font-black text-white">{isOwnProfile ? 'Профиль' : `@${viewUser.username}`}</h1>
+        <h1 style={{ fontSize: 18, fontWeight: 800, color: '#f1f5f9', margin: 0 }}>
+          {isOwn ? 'Профиль' : `@${viewUser.username}`}
+        </h1>
       </div>
 
-      <div className="flex-1 overflow-y-auto scroll-content px-4 pb-4 space-y-3">
+      <div className="scroll-area" style={{ flex: 1, padding: '0 16px 16px' }}>
         {/* Avatar & Info */}
-        <div className="glass-card p-4 rounded-2xl">
-          <div className="flex items-center gap-4">
-            <div className="relative">
-              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-purple-500/30 to-blue-500/30 flex items-center justify-center text-3xl avatar-ring">
+        <div className="glass-card" style={{ padding: 16, marginBottom: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 14 }}>
+            {/* Avatar */}
+            <div style={{ position: 'relative', flexShrink: 0 }}>
+              <div style={{ width: 64, height: 64, borderRadius: 16, background: 'rgba(59,130,246,0.15)',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32 }}>
                 {viewUser.avatar}
               </div>
-              <div className={`absolute -bottom-1 -right-1 text-xs px-1 py-0.5 rounded-full font-bold ${rankMeta.color} bg-black/60`}>
+              <div style={{ position: 'absolute', bottom: -2, right: -2, fontSize: 12 }}>
                 {rankMeta.emoji}
               </div>
             </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <h2 className="text-base font-black text-white">@{viewUser.username}</h2>
-                {viewUser.tonDomains.map(d => (
-                  <span key={d.domain} className="ton-domain-badge">
-                    💎 {d.domain}
-                    {d.verified && <span className="text-emerald-400 text-[9px]">✓</span>}
+
+            {/* Info */}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 16, fontWeight: 800, color: '#f1f5f9' }}>@{viewUser.username}</span>
+                {/* TON domains — shown only in profile */}
+                {viewUser.tonDomains.slice(0, 2).map(d => (
+                  <span key={d.domain} className="ton-domain">
+                    💎 {d.domain} {d.verified && <span style={{ color: '#22c55e' }}>✓</span>}
                   </span>
                 ))}
               </div>
-              <div className="flex items-center gap-2 mt-1">
-                <span className={`text-[11px] font-semibold ${rankMeta.color}`}>{rankMeta.emoji} {rankMeta.label}</span>
-                <span className="text-white/20">·</span>
-                <span className="text-[11px] text-white/40">Rep: {viewUser.reputation}</span>
+              <div style={{ fontSize: 12, marginTop: 3 }}>
+                <span className={rankMeta.color} style={{ fontWeight: 600 }}>{rankMeta.emoji} {rankMeta.label}</span>
+                <span style={{ color: '#475569', marginLeft: 8 }}>Rep: {viewUser.reputation}</span>
               </div>
               {viewUser.bio && (
-                <p className="text-[11px] text-white/50 mt-1 line-clamp-2">{viewUser.bio}</p>
+                <p style={{ margin: '5px 0 0', fontSize: 12, color: '#64748b', lineHeight: 1.5 }}>{viewUser.bio}</p>
               )}
-              <p className="text-[10px] text-white/25 mt-1">
+              <p style={{ margin: '4px 0 0', fontSize: 10, color: '#374151' }}>
                 Участник {formatDistanceToNow(viewUser.joinedAt, { locale: ru, addSuffix: true })}
               </p>
             </div>
@@ -122,186 +113,172 @@ export function Profile({ userId }: Props) {
 
           {/* Win streak */}
           {viewUser.winStreak > 0 && (
-            <div className="mt-3 glass px-3 py-2 rounded-xl flex items-center justify-between">
-              <span className="text-[11px] text-white/50">🔥 Серия побед</span>
-              <span className="text-[12px] font-black text-amber-400">{viewUser.winStreak} подряд</span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                          padding: '8px 10px', background: 'rgba(245,158,11,0.08)',
+                          border: '1px solid rgba(245,158,11,0.15)', borderRadius: 8, marginBottom: 10, fontSize: 12 }}>
+              <span style={{ color: '#fbbf24' }}>🔥 Серия побед: {viewUser.winStreak}</span>
+              <span style={{ color: '#475569' }}>Макс: {viewUser.maxWinStreak}</span>
             </div>
           )}
 
-          {/* Edit / Actions */}
-          {isOwnProfile && !editing && (
-            <button onClick={() => setEditing(true)}
-              className="mt-3 w-full glass text-white/60 text-[11px] py-2 rounded-xl hover:text-white transition-colors font-semibold">
-              ✏️ Редактировать профиль
+          {isOwn && (
+            <button onClick={() => setEditing(!editing)}
+                    style={{ fontSize: 12, color: '#64748b', background: 'rgba(255,255,255,0.05)',
+                             border: '1px solid rgba(255,255,255,0.08)', borderRadius: 7,
+                             padding: '5px 12px', cursor: 'pointer', width: '100%' }}>
+              {editing ? 'Отмена' : '✏️ Редактировать'}
             </button>
           )}
-          {isOwnProfile && editing && (
-            <div className="mt-3 space-y-2 animate-fadeIn">
-              <div>
-                <p className="text-[10px] text-white/40 mb-1">Аватар</p>
-                <div className="flex flex-wrap gap-2">
-                  {AVATARS.map(a => (
-                    <button key={a} onClick={() => setDraft(d => ({ ...d, avatar: a }))}
-                      className={`text-xl w-9 h-9 rounded-xl transition-all ${draft.avatar === a ? 'bg-purple-500/30 ring-1 ring-purple-400' : 'glass hover:bg-white/10'}`}>
-                      {a}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <input className="glass-input w-full rounded-xl px-3 py-2 text-[12px]" placeholder="Username"
-                value={draft.username} onChange={e => setDraft(d => ({ ...d, username: e.target.value }))} />
-              <textarea className="glass-input w-full rounded-xl px-3 py-2 text-[12px] resize-none" rows={2} placeholder="Биография (до 120 символов)"
-                value={draft.bio} onChange={e => setDraft(d => ({ ...d, bio: e.target.value.slice(0, 120) }))} />
-              <div className="flex gap-2">
-                <button onClick={saveEdit} className="btn-primary flex-1 text-white text-[12px] font-bold py-2 rounded-xl">Сохранить</button>
-                <button onClick={() => setEditing(false)} className="glass flex-1 text-white/50 text-[12px] py-2 rounded-xl">Отмена</button>
-              </div>
-            </div>
-          )}
         </div>
 
-        {/* Stats */}
-        <div className="grid grid-cols-3 gap-2">
-          {[
-            { label: 'Поставлено', value: `${viewUser.totalWagered.toFixed(1)}`, unit: 'TON', color: 'text-white' },
-            { label: 'Выиграно', value: `${viewUser.totalWon.toFixed(1)}`, unit: 'TON', color: 'text-emerald-400' },
-            { label: 'ROI', value: `${roiPos ? '+' : ''}${roi}`, unit: '%', color: roiPos ? 'text-emerald-400' : 'text-red-400' },
-          ].map(s => (
-            <div key={s.label} className="glass-card p-3 rounded-xl text-center">
-              <p className="text-[9px] text-white/35 mb-1">{s.label}</p>
-              <p className={`text-[15px] font-black ${s.color}`}>{s.value}<span className="text-[10px] ml-0.5 opacity-60">{s.unit}</span></p>
-            </div>
-          ))}
-        </div>
+        {/* Edit form */}
+        {editing && isOwn && (
+          <div className="glass-card" style={{ padding: 14, marginBottom: 12 }}>
+            <div className="section-label" style={{ marginBottom: 10 }}>Редактирование</div>
 
-        {/* Reputation bar */}
-        <div className="glass-card p-3 rounded-xl">
-          <div className="flex justify-between text-[11px] mb-2">
-            <span className="text-white/40">Репутация</span>
-            <span className={rankMeta.color}>{rankMeta.emoji} {rankMeta.label} · {viewUser.reputation}/1000</span>
-          </div>
-          <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
-            <div className="h-full bg-gradient-to-r from-purple-500 to-blue-500 rounded-full transition-all duration-700"
-              style={{ width: `${Math.min(100, viewUser.reputation / 10)}%` }} />
-          </div>
-          <div className="flex justify-between text-[9px] text-white/25 mt-1">
-            <span>Новичок</span><span>Игрок</span><span>Эксперт</span><span>Легенда</span><span>Кит</span>
-          </div>
-        </div>
-
-        {/* TON Domains — own profile only */}
-        {isOwnProfile && (
-          <div className="glass-card p-3 rounded-xl">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[12px] font-bold text-white">💎 TON Домены</span>
-              <button onClick={() => setShowDomainForm(f => !f)}
-                className="text-[10px] text-blue-400 hover:text-blue-300">
-                {showDomainForm ? 'Скрыть' : '+ Привязать'}
-              </button>
-            </div>
-            {currentUser.tonDomains.length === 0 && !showDomainForm && (
-              <p className="text-[11px] text-white/30">Нет привязанных доменов. Привяжи свой .ton домен!</p>
-            )}
-            {currentUser.tonDomains.map(d => (
-              <div key={d.domain} className="flex items-center justify-between mb-1.5">
-                <div className="flex items-center gap-2">
-                  <span className="ton-domain-badge">💎 {d.domain}</span>
-                  {d.verified
-                    ? <span className="text-[10px] text-emerald-400">✓ Верифицирован</span>
-                    : <span className="text-[10px] text-amber-400">⏳ Ожидание</span>}
-                </div>
-                <button onClick={() => unlinkTonDomain(d.domain)}
-                  className="text-[10px] text-red-400/60 hover:text-red-400">✕</button>
+            {/* Avatar picker */}
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: 11, color: '#64748b', marginBottom: 6 }}>Аватар</div>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {AVATARS.map(av => (
+                  <button key={av} onClick={() => setDraft({ ...draft, avatar: av })}
+                          style={{ width: 36, height: 36, borderRadius: 8, fontSize: 20,
+                                   background: draft.avatar === av ? 'rgba(59,130,246,0.2)' : 'rgba(255,255,255,0.05)',
+                                   border: `1px solid ${draft.avatar === av ? 'rgba(59,130,246,0.4)' : 'rgba(255,255,255,0.08)'}`,
+                                   cursor: 'pointer' }}>
+                    {av}
+                  </button>
+                ))}
               </div>
-            ))}
-            {showDomainForm && (
-              <div className="mt-2 space-y-2 animate-fadeIn">
-                <input className="glass-input w-full rounded-xl px-3 py-2 text-[12px]"
-                  placeholder="example.ton"
-                  value={domainInput}
-                  onChange={e => setDomainInput(e.target.value)} />
-                {domainError && <p className="text-[10px] text-red-400">{domainError}</p>}
-                {domainSuccess && <p className="text-[10px] text-emerald-400">{domainSuccess}</p>}
-                <button onClick={handleLinkDomain}
-                  className="btn-primary w-full text-white text-[12px] font-bold py-2 rounded-xl">
-                  Привязать домен
+            </div>
+
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 11, color: '#64748b', marginBottom: 4 }}>Имя пользователя</div>
+              <input className="form-input" value={draft.username}
+                     onChange={e => setDraft({ ...draft, username: e.target.value })} maxLength={24} />
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: 11, color: '#64748b', marginBottom: 4 }}>О себе</div>
+              <textarea className="form-input" rows={2} value={draft.bio}
+                        onChange={e => setDraft({ ...draft, bio: e.target.value })} maxLength={120} />
+            </div>
+            <button className="btn-primary" style={{ width: '100%', padding: '9px' }} onClick={saveEdit}>
+              Сохранить
+            </button>
+          </div>
+        )}
+
+        {/* TON Domains (ONLY in Profile, only if they exist) */}
+        {isOwn && (
+          <div className="glass-card" style={{ padding: 14, marginBottom: 12 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+              <div className="section-label">TON DNS</div>
+              {tonWalletAddress && (
+                <button onClick={handleLoadDomains} disabled={loadingDomains}
+                        style={{ fontSize: 11, color: '#60a5fa', background: 'rgba(59,130,246,0.1)',
+                                 border: '1px solid rgba(59,130,246,0.2)', borderRadius: 6,
+                                 padding: '4px 10px', cursor: 'pointer' }}>
+                  {loadingDomains ? '⏳ Загрузка...' : '🔄 Обновить'}
                 </button>
-                <p className="text-[9px] text-white/25 text-center">
-                  Для верификации: добавьте TXT-запись flashbet-verify в DNS вашего домена
+              )}
+            </div>
+
+            {viewUser.tonDomains.length === 0 ? (
+              tonWalletAddress ? (
+                <p style={{ fontSize: 12, color: '#475569', margin: 0 }}>
+                  На вашем кошельке нет .ton доменов. Домены из TON DNS NFT появятся автоматически после нажатия «Обновить».
                 </p>
+              ) : (
+                <p style={{ fontSize: 12, color: '#475569', margin: 0 }}>
+                  Подключите кошелёк — TON домены с него появятся здесь.
+                </p>
+              )
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {viewUser.tonDomains.map(d => (
+                  <div key={d.domain} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                                               padding: '8px 10px', background: 'rgba(0,136,255,0.07)',
+                                               border: '1px solid rgba(0,136,255,0.15)', borderRadius: 8 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                      <span style={{ fontSize: 16 }}>💎</span>
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: '#60a5fa' }}>{d.domain}</div>
+                        <div style={{ fontSize: 10, color: '#475569' }}>
+                          {d.verified ? '✓ Верифицирован' : 'Не верифицирован'} · NFT в кошельке
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </div>
         )}
 
-        {/* Public bet history */}
-        {(isOwnProfile || viewUser.profilePublic) && recentBets.length > 0 && (
+        {/* Stats */}
+        <div className="glass-card" style={{ padding: 14, marginBottom: 12 }}>
+          <div className="section-label" style={{ marginBottom: 12 }}>Статистика</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            {[
+              { label: 'Вложено', value: `${viewUser.totalWagered.toFixed(1)} TON` },
+              { label: 'Выиграно', value: `${viewUser.totalWon.toFixed(1)} TON`, color: '#22c55e' },
+              { label: 'ROI', value: `${roiPos ? '+' : ''}${roi}%`, color: roiPos ? '#22c55e' : '#ef4444' },
+              { label: 'Ставок', value: myBets.length.toString() },
+            ].map(({ label, value, color }) => (
+              <div key={label} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 8, padding: '10px 12px' }}>
+                <div style={{ fontSize: 11, color: '#475569', marginBottom: 4 }}>{label}</div>
+                <div style={{ fontSize: 15, fontWeight: 700, color: color || '#f1f5f9' }}>{value}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Wallet */}
+        {isOwn && (
+          <div className="glass-card" style={{ padding: 14, marginBottom: 12 }}>
+            <div className="section-label" style={{ marginBottom: 8 }}>Кошелёк</div>
+            {tonWalletAddress ? (
+              <div style={{ fontSize: 12, color: '#22c55e', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span>✓ Подключён</span>
+                <span style={{ color: '#475569', fontFamily: 'monospace', fontSize: 11 }}>
+                  {tonWalletAddress.slice(0, 10)}...{tonWalletAddress.slice(-6)}
+                </span>
+              </div>
+            ) : (
+              <p style={{ fontSize: 12, color: '#64748b', margin: 0 }}>
+                Кошелёк не подключён. Используйте кнопку «Подключить» вверху страницы.
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Recent bets */}
+        {myBets.length > 0 && (
           <div>
-            <p className="text-[10px] text-white/30 font-semibold uppercase tracking-wider mb-2">
-              {isOwnProfile ? '🎯 Мои ставки' : '🎯 Публичные ставки'}
-            </p>
-            {recentBets.map(b => {
-              const userBet = b.participants.find(p => p.userId === viewUser.id);
-              const won = b.outcome && userBet?.side === b.outcome;
+            <div className="section-label" style={{ marginBottom: 8 }}>
+              {isOwn ? 'Мои ставки' : 'Ставки пользователя'}
+            </div>
+            {myBets.slice(0, 5).map(bet => {
+              const myP = bet.participants.find(p => p.userId === viewUser.id);
               return (
-                <div key={b.id} className="glass-card px-3 py-2.5 rounded-xl mb-2">
-                  <p className="text-[12px] font-semibold text-white line-clamp-1 mb-1">{b.title}</p>
-                  <div className="flex justify-between text-[10px]">
-                    <span className={userBet?.side === 'yes' ? 'text-emerald-400' : 'text-red-400'}>
-                      {userBet?.side === 'yes' ? 'ДА' : 'НЕТ'} · {userBet?.amount} TON
-                    </span>
-                    <span className={b.status === 'resolved' ? (won ? 'text-emerald-400' : 'text-red-400') : 'text-white/30'}>
-                      {b.status === 'resolved' ? (won ? '🏆 Победа' : '😔 Проигрыш') : '⏳ Активна'}
-                    </span>
+                <div key={bet.id} className="glass-card" style={{ padding: '10px 14px', marginBottom: 8,
+                                                                    display: 'flex', justifyContent: 'space-between',
+                                                                    alignItems: 'center', cursor: 'pointer' }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.3 }} className="line-clamp-1">
+                      {bet.title}
+                    </div>
+                    <div style={{ fontSize: 10, color: '#475569', marginTop: 2 }}>
+                      {myP?.side === 'yes' ? 'ДА' : 'НЕТ'} · {myP?.amount.toFixed(2)} TON
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 11, fontWeight: 700, flexShrink: 0,
+                                color: bet.status === 'active' ? '#22c55e' : '#64748b' }}>
+                    {bet.status === 'active' ? '● LIVE' : bet.status === 'resolved' ? '✓' : '—'}
                   </div>
                 </div>
               );
             })}
-          </div>
-        )}
-
-        {!isOwnProfile && !viewUser.profilePublic && (
-          <div className="glass-card p-4 rounded-xl text-center text-white/40 text-sm">
-            🔒 Этот профиль приватный
-          </div>
-        )}
-
-        {/* Notifications — own profile only */}
-        {isOwnProfile && currentUser.notifications.length > 0 && (
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-[10px] text-white/30 font-semibold uppercase tracking-wider">
-                🔔 Уведомления {unreadCount > 0 && <span className="ml-1 bg-red-500 text-white text-[9px] px-1 rounded-full">{unreadCount}</span>}
-              </p>
-            </div>
-            {currentUser.notifications.slice(0, 6).map(n => (
-              <div key={n.id} className="glass-card px-3 py-2.5 rounded-xl mb-1.5 flex items-start justify-between">
-                <div>
-                  <p className="text-[11px] font-semibold text-white">{n.title}</p>
-                  <p className="text-[10px] text-white/50 mt-0.5">{n.message}</p>
-                  <p className="text-[9px] text-white/25 mt-0.5">{formatDistanceToNow(n.timestamp, { locale: ru, addSuffix: true })}</p>
-                </div>
-                {!n.read && <div className="w-1.5 h-1.5 bg-blue-400 rounded-full mt-1 flex-shrink-0" />}
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Referral — own profile only */}
-        {isOwnProfile && (
-          <div className="glass-card p-4 rounded-xl">
-            <p className="text-[12px] font-bold text-white mb-2">👥 Реферальная программа</p>
-            <p className="text-[11px] text-white/50 mb-3">
-              Приглашай друзей и получай {SECURITY_CONFIG.REFERRAL_PCT * 100}% от их ставок автоматически
-            </p>
-            <div className="glass px-3 py-2 rounded-xl flex items-center justify-between">
-              <span className="text-[11px] text-white/40">Ваш код</span>
-              <span className="text-[13px] font-black text-purple-400 tracking-wider">{currentUser.referralCode}</span>
-            </div>
-            <div className="flex justify-between text-[11px] text-white/40 mt-2">
-              <span>{currentUser.referrals.length} рефералов</span>
-              <span className="text-emerald-400">{currentUser.referralEarnings.toFixed(3)} TON заработано</span>
-            </div>
           </div>
         )}
       </div>

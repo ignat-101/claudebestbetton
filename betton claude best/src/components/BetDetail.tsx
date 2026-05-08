@@ -3,52 +3,36 @@ import { useStore } from '../store/useStore';
 import { formatDistanceToNow } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
-import { SECURITY_CONFIG, computePosResult, checkBetSizeLimit } from '../security/proofOfStake';
 
-const MIN_BET = SECURITY_CONFIG.MIN_BET_TON;
-
-// Minimal TON Connect-like stub for demo (real integration via @tonconnect/ui-react)
-function useTonWalletStub() {
-  const { tonWalletAddress } = useStore();
-  return { connected: !!tonWalletAddress, address: tonWalletAddress };
-}
-
-function buildDemoTxHash(): string {
-  return Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
-}
+const MIN_BET = 0.1;
+const PLATFORM_FEE = 0.02;
 
 export function BetDetail() {
-  const {
-    selectedBetId, bets, currentUser, recordBet, voteOnBet, addComment,
-    setSelectedBetId,
-  } = useStore();
+  const { selectedBetId, bets, currentUser, recordBet, addComment, setSelectedBetId, tonWalletAddress } = useStore();
   const bet = bets.find(b => b.id === selectedBetId);
-  const wallet = useTonWalletStub();
 
-  const [tab, setTab] = useState<'chart' | 'comments' | 'votes'>('chart');
   const [side, setSide] = useState<'yes' | 'no' | null>(null);
-  const [amount, setAmount] = useState(0.1);
+  const [amount, setAmount] = useState(0.5);
   const [comment, setComment] = useState('');
   const [txStatus, setTxStatus] = useState<'idle' | 'pending' | 'success' | 'error'>('idle');
   const [txError, setTxError] = useState('');
-  const [showSuccess, setShowSuccess] = useState(false);
-  const [voteStake, setVoteStake] = useState(SECURITY_CONFIG.MIN_VALIDATOR_STAKE_TON);
-  const [voteError, setVoteError] = useState('');
-  const [sizeWarn, setSizeWarn] = useState('');
+  const [activeTab, setActiveTab] = useState<'chart' | 'comments' | 'bets'>('chart');
 
-  useEffect(() => {
-    if (!bet || !side) { setSizeWarn(''); return; }
-    const check = checkBetSizeLimit(amount, bet.yesPool, bet.noPool);
-    setSizeWarn(check.allowed ? '' : (check.reason ?? ''));
-  }, [amount, side, bet]);
+  useEffect(() => { setSide(null); setTxStatus('idle'); setTxError(''); }, [selectedBetId]);
 
   if (!bet) return null;
 
+  const yesPct = Math.round(bet.yesPrice * 100);
+  const noPct = 100 - yesPct;
   const isActive = bet.status === 'active';
+  const isConnected = !!tonWalletAddress;
   const myBets = bet.participants.filter(p => p.userId === currentUser.id);
-  const hasVoted = currentUser.votedBets.includes(bet.id);
-  const posResult = computePosResult(bet.votes);
-  const yesWidth = Math.round(bet.yesPrice * 100);
+
+  // Potential return calculation (like polymarket)
+  const potentialReturn = side && amount >= MIN_BET
+    ? amount * (1 / (side === 'yes' ? Math.max(0.01, bet.yesPrice) : Math.max(0.01, bet.noPrice))) * (1 - PLATFORM_FEE)
+    : 0;
+  const potentialProfit = potentialReturn - amount;
 
   const chartData = bet.priceHistory.map(p => ({
     t: new Date(p.time).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' }),
@@ -56,309 +40,333 @@ export function BetDetail() {
     no: Math.round(p.noPrice * 100),
   }));
 
-  const potentialReturn = side
-    ? amount * (side === 'yes' ? (1 / Math.max(0.01, bet.yesPrice)) - 1 : (1 / Math.max(0.01, bet.noPrice)) - 1) *
-      (1 - SECURITY_CONFIG.PLATFORM_FEE_PCT - SECURITY_CONFIG.VALIDATOR_REWARD_PCT)
-    : 0;
-
   const handleBet = async () => {
     if (!side || amount < MIN_BET) return;
-    if (!wallet.connected) {
+    if (!isConnected) {
       setTxError('Подключите TON кошелёк');
       setTxStatus('error');
       return;
     }
-    if (sizeWarn) { setTxError(sizeWarn); setTxStatus('error'); return; }
-
     setTxStatus('pending');
     setTxError('');
 
-    // In production: use @tonconnect/ui-react sendTransaction
-    // Here we simulate confirmed tx for demo purposes
+    // Simulate TX delay (real: use @tonconnect/ui-react sendTransaction)
     await new Promise(r => setTimeout(r, 1200));
-    const txHash = buildDemoTxHash();
+    const txHash = Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
     const expectedPrice = side === 'yes' ? bet.yesPrice : bet.noPrice;
     const result = recordBet(bet.id, side, amount, txHash, expectedPrice);
 
     if (!result.ok) {
-      setTxError(result.error ?? 'Ошибка');
+      setTxError(result.error || 'Ошибка');
       setTxStatus('error');
       return;
     }
     setTxStatus('success');
-    setShowSuccess(true);
     setSide(null);
-    setTimeout(() => { setShowSuccess(false); setTxStatus('idle'); }, 3500);
-  };
-
-  const handleVote = (choice: 'yes' | 'no') => {
-    setVoteError('');
-    const r = voteOnBet(bet.id, choice, voteStake);
-    if (!r.ok) setVoteError(r.error ?? 'Ошибка голосования');
+    setTimeout(() => setTxStatus('idle'), 3000);
   };
 
   return (
-    <div className="flex flex-col h-full bg-mesh animate-slideUp">
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }} className="page-enter">
       {/* Header */}
-      <div className="flex-shrink-0 glass px-4 pt-4 pb-3 border-b border-white/5">
-        <div className="flex items-start gap-3">
-          <button
-            onClick={() => setSelectedBetId(null)}
-            className="glass-card w-8 h-8 flex items-center justify-center text-white/50 hover:text-white flex-shrink-0 rounded-xl text-lg"
-          >←</button>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-1.5 mb-1 flex-wrap">
-              {bet.featured && <span className="badge-featured text-[9px] px-1.5 py-0.5 rounded-full font-bold">⭐ ТОП</span>}
-              {bet.status === 'active' && <span className="badge-active text-[9px] px-1.5 py-0.5 rounded-full font-bold">● LIVE</span>}
-              {bet.oracleType === 'price' && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-blue-500/15 text-blue-300 border border-blue-500/25">📊 Oracle</span>}
-              {bet.oracleType === 'vote' && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-purple-500/15 text-purple-300 border border-purple-500/25">⚖️ PoS Vote</span>}
-            </div>
-            <h2 className="text-sm font-black text-white leading-tight">{bet.title}</h2>
-            <div className="flex items-center gap-2 mt-1 text-[10px] text-white/35">
-              <span>@{bet.creatorUsername}</span>
-              <span>·</span>
-              <span>⏱ {formatDistanceToNow(bet.resolveAt, { locale: ru, addSuffix: true })}</span>
-            </div>
-          </div>
+      <div style={{ padding: '14px 16px 12px', borderBottom: '1px solid rgba(255,255,255,0.05)', flexShrink: 0 }}>
+        <button
+          onClick={() => setSelectedBetId(null)}
+          style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#64748b',
+                   fontSize: 13, marginBottom: 10, cursor: 'pointer', background: 'none', border: 'none', padding: 0 }}
+        >
+          ← Назад
+        </button>
+
+        <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
+          {bet.featured && <span className="badge-featured">🔥 Топ</span>}
+          {bet.status === 'active' && <span className="badge-live"><span className="live-dot" />LIVE</span>}
+          {bet.status === 'voting' && <span className="badge-voting">🗳 VOTE</span>}
+          {bet.status === 'resolved' && <span className="badge-resolved">✓ Resolved</span>}
+          {bet.oracleType === 'price' && (
+            <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 4, background: 'rgba(59,130,246,0.1)',
+                           color: '#60a5fa', border: '1px solid rgba(59,130,246,0.2)' }}>📊 Oracle</span>
+          )}
         </div>
 
-        {/* Pools */}
-        <div className="mt-3 glass-card p-3 rounded-xl">
-          <div className="flex justify-between text-[10px] text-white/35 mb-2">
-            <span>💎 {bet.totalVolume.toFixed(3)} TON в пуле</span>
-            <span>👥 {bet.participants.length} участников</span>
-          </div>
-          <div className="flex rounded-md overflow-hidden h-2 mb-2">
-            <div className="yes-bar transition-all duration-500" style={{ width: `${yesWidth}%` }} />
-            <div className="no-bar transition-all duration-500" style={{ width: `${100-yesWidth}%` }} />
-          </div>
-          <div className="flex justify-between text-[12px] font-black">
-            <span className="text-emerald-400">ДА {yesWidth}%</span>
-            <span className="text-red-400">НЕТ {100-yesWidth}%</span>
-          </div>
+        <h2 style={{ fontSize: 16, fontWeight: 700, color: '#f1f5f9', margin: '0 0 6px', lineHeight: 1.4 }}>
+          {bet.title}
+        </h2>
+        <div style={{ fontSize: 11, color: '#475569', display: 'flex', gap: 8 }}>
+          <span>@{bet.creatorUsername}</span>
+          <span>·</span>
+          <span>⏱ {formatDistanceToNow(bet.resolveAt, { locale: ru, addSuffix: true })}</span>
         </div>
 
-        {/* My bets */}
+        {/* Prob bar */}
+        <div style={{ marginTop: 12 }}>
+          <div style={{ display: 'flex', height: 8, borderRadius: 6, overflow: 'hidden', gap: 1, marginBottom: 6 }}>
+            <div className="prob-bar-yes" style={{ width: `${yesPct}%` }} />
+            <div className="prob-bar-no" style={{ width: `${noPct}%` }} />
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, fontWeight: 800 }}>
+            <span style={{ color: '#22c55e' }}>ДА {yesPct}%</span>
+            <span style={{ color: '#94a3b8', fontSize: 11 }}>
+              {bet.totalVolume.toFixed(1)} TON · {bet.participants.length} участников
+            </span>
+            <span style={{ color: '#ef4444' }}>НЕТ {noPct}%</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Scrollable content */}
+      <div className="scroll-area" style={{ flex: 1, padding: '12px 16px 16px' }}>
+        {/* Bet panel */}
+        {isActive && (
+          <div className="glass-card" style={{ padding: 14, marginBottom: 12 }}>
+            {/* Side buttons */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
+              <button
+                className={`btn-yes ${side === 'yes' ? 'active' : ''}`}
+                style={{ padding: '10px', fontSize: 14 }}
+                onClick={() => setSide(side === 'yes' ? null : 'yes')}
+              >
+                ДА · {yesPct}%
+              </button>
+              <button
+                className={`btn-no ${side === 'no' ? 'active' : ''}`}
+                style={{ padding: '10px', fontSize: 14 }}
+                onClick={() => setSide(side === 'no' ? null : 'no')}
+              >
+                НЕТ · {noPct}%
+              </button>
+            </div>
+
+            {side && (
+              <>
+                {/* Amount input */}
+                <div style={{ marginBottom: 10 }}>
+                  <div style={{ fontSize: 11, color: '#64748b', marginBottom: 6 }}>Сумма ставки (TON)</div>
+                  <input
+                    type="number" min={0.1} step={0.1}
+                    value={amount}
+                    onChange={e => setAmount(Number(e.target.value))}
+                    className="form-input"
+                  />
+                  {/* Quick amounts */}
+                  <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                    {[0.5, 1, 5, 10, 50].map(v => (
+                      <button key={v}
+                        onClick={() => setAmount(v)}
+                        style={{ flex: 1, padding: '4px 0', fontSize: 11, borderRadius: 6,
+                                 background: amount === v ? 'rgba(59,130,246,0.2)' : 'rgba(255,255,255,0.05)',
+                                 border: '1px solid rgba(255,255,255,0.08)', color: '#94a3b8', cursor: 'pointer' }}>
+                        {v}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Return calculation */}
+                {amount >= MIN_BET && (
+                  <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 8, padding: '8px 10px',
+                                marginBottom: 10, fontSize: 12 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                      <span style={{ color: '#64748b' }}>Потенциальный выигрыш</span>
+                      <span style={{ color: '#f1f5f9', fontWeight: 700 }}>{potentialReturn.toFixed(2)} TON</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                      <span style={{ color: '#64748b' }}>Прибыль</span>
+                      <span style={{ color: potentialProfit >= 0 ? '#22c55e' : '#ef4444', fontWeight: 700 }}>
+                        {potentialProfit >= 0 ? '+' : ''}{potentialProfit.toFixed(2)} TON
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: '#475569', fontSize: 10 }}>Комиссия платформы (2%)</span>
+                      <span style={{ color: '#475569', fontSize: 10 }}>{(amount * PLATFORM_FEE).toFixed(3)} TON</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Place bet button */}
+                <button
+                  className="btn-primary"
+                  style={{ width: '100%', padding: '11px', fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+                  disabled={txStatus === 'pending' || amount < MIN_BET}
+                  onClick={handleBet}
+                >
+                  {txStatus === 'pending' ? (
+                    <><div className="spinner" /> Подтверждение...</>
+                  ) : txStatus === 'success' ? (
+                    '✓ Ставка принята!'
+                  ) : (
+                    isConnected
+                      ? `Поставить ${amount} TON на ${side === 'yes' ? 'ДА' : 'НЕТ'}`
+                      : '🔗 Подключите кошелёк'
+                  )}
+                </button>
+
+                {txError && (
+                  <div style={{ marginTop: 8, padding: '7px 10px', borderRadius: 6, fontSize: 12,
+                                background: 'rgba(239,68,68,0.1)', color: '#f87171', border: '1px solid rgba(239,68,68,0.2)' }}>
+                    ⚠️ {txError}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
+        {/* My positions */}
         {myBets.length > 0 && (
-          <div className="mt-2 flex gap-2 flex-wrap">
+          <div className="glass-card" style={{ padding: 12, marginBottom: 12 }}>
+            <div className="section-label" style={{ marginBottom: 8 }}>Мои позиции</div>
             {myBets.map((mb, i) => (
-              <div key={i} className={`text-[10px] px-2 py-1 rounded-full border font-semibold ${mb.side === 'yes' ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' : 'bg-red-500/15 text-red-400 border-red-500/30'}`}>
-                Моя ставка: {mb.side === 'yes' ? 'ДА' : 'НЕТ'} {mb.amount} TON
+              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                                    padding: '6px 0', borderBottom: i < myBets.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none',
+                                    fontSize: 12 }}>
+                <span style={{ color: mb.side === 'yes' ? '#22c55e' : '#ef4444', fontWeight: 600 }}>
+                  {mb.side === 'yes' ? 'ДА' : 'НЕТ'}
+                </span>
+                <span style={{ color: '#94a3b8' }}>{mb.amount.toFixed(2)} TON</span>
+                <span style={{ color: '#64748b' }}>@ {Math.round(mb.avgPrice * 100)}%</span>
               </div>
             ))}
           </div>
         )}
-      </div>
 
-      {/* Bet panel */}
-      {isActive && (
-        <div className="flex-shrink-0 px-4 py-3 border-b border-white/5">
-          {showSuccess ? (
-            <div className="glass-card p-4 rounded-xl text-center animate-fadeIn glow-green">
-              <div className="text-2xl mb-1">🎉</div>
-              <p className="text-emerald-400 font-bold text-sm">Ставка принята!</p>
-              <p className="text-white/50 text-[11px] mt-1">Транзакция подтверждена on-chain</p>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              <div className="flex gap-2">
-                <button className={`btn-yes flex-1 text-sm font-bold py-2.5 rounded-xl ${side === 'yes' ? 'active' : ''}`} onClick={() => setSide(side === 'yes' ? null : 'yes')}>
-                  ✅ ДА
-                </button>
-                <button className={`btn-no flex-1 text-sm font-bold py-2.5 rounded-xl ${side === 'no' ? 'active' : ''}`} onClick={() => setSide(side === 'no' ? null : 'no')}>
-                  ❌ НЕТ
-                </button>
-              </div>
-
-              {side && (
-                <div className="glass-card p-3 rounded-xl space-y-2 animate-fadeIn">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] text-white/50">Сумма ставки</span>
-                    <span className="text-[11px] text-emerald-400 font-semibold">
-                      Потенциал: +{potentialReturn.toFixed(3)} TON
-                    </span>
-                  </div>
-                  <div className="flex gap-1.5">
-                    {[0.1, 0.5, 1, 5].map(v => (
-                      <button key={v} onClick={() => setAmount(v)}
-                        className={`flex-1 text-[11px] py-1 rounded-lg font-semibold transition-all ${amount === v ? 'bg-purple-500/30 text-purple-300 border border-purple-500/50' : 'glass text-white/50 hover:text-white'}`}>
-                        {v}
-                      </button>
-                    ))}
-                    <input
-                      type="number" step="0.01" min={MIN_BET}
-                      value={amount}
-                      onChange={e => setAmount(Math.max(MIN_BET, parseFloat(e.target.value) || MIN_BET))}
-                      className="glass-input flex-1 text-[11px] text-center rounded-lg px-1 py-1 w-14"
-                    />
-                  </div>
-                  {sizeWarn && <p className="text-[10px] text-amber-400">⚠️ {sizeWarn}</p>}
-                  {txError && <p className="text-[10px] text-red-400">❌ {txError}</p>}
-                  {!wallet.connected && <p className="text-[10px] text-amber-400">⚠️ Подключите TON кошелёк для реальных ставок</p>}
-                  <button
-                    onClick={handleBet}
-                    disabled={txStatus === 'pending'}
-                    className="btn-primary w-full text-white text-sm font-bold py-2.5 rounded-xl disabled:opacity-50"
-                  >
-                    {txStatus === 'pending' ? '⏳ Отправка...' : `Поставить ${amount} TON на ${side === 'yes' ? 'ДА' : 'НЕТ'}`}
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
+        {/* Tabs */}
+        <div style={{ display: 'flex', gap: 2, marginBottom: 12, background: 'rgba(255,255,255,0.04)',
+                      borderRadius: 8, padding: 3 }}>
+          {(['chart', 'comments', 'bets'] as const).map(tab => (
+            <button key={tab}
+              onClick={() => setActiveTab(tab)}
+              style={{ flex: 1, padding: '6px 8px', fontSize: 12, fontWeight: 600, borderRadius: 6,
+                       background: activeTab === tab ? 'rgba(255,255,255,0.1)' : 'transparent',
+                       color: activeTab === tab ? '#f1f5f9' : '#64748b', border: 'none', cursor: 'pointer', transition: 'all 0.15s' }}>
+              {tab === 'chart' ? '📈 График' : tab === 'comments' ? `💬 ${bet.comments.length}` : `👥 Ставки`}
+            </button>
+          ))}
         </div>
-      )}
 
-      {/* Tabs */}
-      <div className="flex-shrink-0 flex border-b border-white/5">
-        {(['chart', 'votes', 'comments'] as const).map(t => (
-          <button key={t} onClick={() => setTab(t)}
-            className={`flex-1 py-2.5 text-[11px] font-semibold transition-colors ${tab === t ? 'text-purple-400 border-b-2 border-purple-400' : 'text-white/35'}`}>
-            {t === 'chart' ? '📈 График' : t === 'votes' ? `⚖️ PoS (${bet.votes.length})` : `💬 (${bet.comments.length})`}
-          </button>
-        ))}
-      </div>
+        {/* Chart */}
+        {activeTab === 'chart' && (
+          <div className="glass-card" style={{ padding: 12 }}>
+            <div style={{ fontSize: 11, color: '#64748b', marginBottom: 8 }}>История вероятности (%)</div>
+            <ResponsiveContainer width="100%" height={160}>
+              <LineChart data={chartData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+                <XAxis dataKey="t" tick={{ fontSize: 9 }} interval="preserveStartEnd" />
+                <YAxis domain={[0, 100]} tick={{ fontSize: 9 }} />
+                <Tooltip
+                  contentStyle={{ background: '#1e2333', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, fontSize: 11 }}
+                  formatter={(v: unknown, name: unknown) => [`${v}%`, name === 'yes' ? 'ДА' : 'НЕТ'] as [string, string]}
+                />
+                <Line type="monotone" dataKey="yes" stroke="#22c55e" strokeWidth={2} dot={false} name="yes" />
+                <Line type="monotone" dataKey="no" stroke="#ef4444" strokeWidth={1.5} dot={false} name="no" strokeDasharray="4 2" />
+              </LineChart>
+            </ResponsiveContainer>
 
-      {/* Tab content */}
-      <div className="flex-1 overflow-y-auto scroll-content px-4 py-3">
-        {tab === 'chart' && (
-          <div className="space-y-3">
-            <p className="text-[11px] text-white/40 leading-relaxed">{bet.description}</p>
-            {chartData.length > 1 ? (
-              <div className="glass-card p-3 rounded-xl">
-                <p className="text-[10px] text-white/30 mb-2 font-semibold">История цены (%)</p>
-                <ResponsiveContainer width="100%" height={120}>
-                  <LineChart data={chartData}>
-                    <XAxis dataKey="t" tick={{ fontSize: 9, fill: 'rgba(255,255,255,0.3)' }} />
-                    <YAxis domain={[0,100]} tick={{ fontSize: 9, fill: 'rgba(255,255,255,0.3)' }} />
-                    <Tooltip contentStyle={{ background: 'rgba(10,10,35,0.9)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, fontSize: 11 }} />
-                    <Line type="monotone" dataKey="yes" stroke="#10b981" strokeWidth={2} dot={false} />
-                    <Line type="monotone" dataKey="no" stroke="#ef4444" strokeWidth={2} dot={false} />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-            ) : (
-              <div className="glass-card p-4 rounded-xl text-center text-white/30 text-sm">
-                📊 График появится после первых ставок
+            {/* Description */}
+            {bet.description && (
+              <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid rgba(255,255,255,0.05)',
+                            fontSize: 13, color: '#94a3b8', lineHeight: 1.6 }}>
+                {bet.description}
               </div>
             )}
 
-            {/* Info */}
-            <div className="glass-card p-3 rounded-xl space-y-1.5">
-              <div className="flex justify-between text-[11px]">
-                <span className="text-white/40">Тип оракула</span>
-                <span className="text-white/70">{bet.oracleType === 'price' ? '📊 Price Feed' : bet.oracleType === 'vote' ? '⚖️ PoS Vote' : '👤 Manual'}</span>
-              </div>
-              <div className="flex justify-between text-[11px]">
-                <span className="text-white/40">Комиссия платформы</span>
-                <span className="text-white/70">{bet.feePercent}%</span>
-              </div>
-              <div className="flex justify-between text-[11px]">
-                <span className="text-white/40">Награда валидаторам</span>
-                <span className="text-white/70">{SECURITY_CONFIG.VALIDATOR_REWARD_PCT * 100}%</span>
-              </div>
-              <div className="flex justify-between text-[11px]">
-                <span className="text-white/40">Теги</span>
-                <span className="text-white/70">{bet.tags.join(', ')}</span>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {tab === 'votes' && (
-          <div className="space-y-3">
-            {/* PoS Status */}
-            <div className="glass-card p-4 rounded-xl">
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-[12px] font-bold text-white">⚖️ PoS Результат</span>
-                <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${posResult.quorumReached ? 'bg-emerald-500/20 text-emerald-400' : 'bg-white/10 text-white/40'}`}>
-                  {posResult.quorumReached ? `✅ Кворум ${posResult.confidence}%` : `⏳ ${posResult.validatorCount}/${SECURITY_CONFIG.MIN_VALIDATORS_FOR_RESOLUTION} вал.`}
-                </span>
-              </div>
-              <div className="flex rounded-md overflow-hidden h-2 mb-2">
-                <div className="pos-bar-yes transition-all" style={{ width: `${posResult.yesWeightPct}%` }} />
-                <div className="pos-bar-no transition-all" style={{ width: `${posResult.noWeightPct}%` }} />
-              </div>
-              <div className="flex justify-between text-[11px] font-semibold">
-                <span className="text-emerald-400">ДА {posResult.yesWeightPct}%</span>
-                <span className="text-red-400">НЕТ {posResult.noWeightPct}%</span>
-              </div>
-              {posResult.collusionRisk && (
-                <p className="text-[10px] text-amber-400 mt-2">⚠️ Обнаружен риск сговора — голоса поданы в течение 5 минут</p>
-              )}
-              {posResult.supermajority && (
-                <p className="text-[10px] text-purple-400 mt-2">🔐 Суперквалифицированное большинство ≥80%</p>
-              )}
-            </div>
-
-            {/* Vote */}
-            {!hasVoted && isActive && (
-              <div className="glass-card p-3 rounded-xl space-y-2">
-                <p className="text-[11px] text-white/50">Ваш голос (квадратичное взвешивание по stake)</p>
-                <div className="flex items-center gap-2">
-                  <span className="text-[11px] text-white/40">Stake</span>
-                  <input type="number" step="0.01" min={SECURITY_CONFIG.MIN_VALIDATOR_STAKE_TON}
-                    value={voteStake} onChange={e => setVoteStake(Math.max(SECURITY_CONFIG.MIN_VALIDATOR_STAKE_TON, parseFloat(e.target.value) || SECURITY_CONFIG.MIN_VALIDATOR_STAKE_TON))}
-                    className="glass-input text-[12px] px-2 py-1 rounded-lg w-24 text-center" />
-                  <span className="text-[11px] text-white/40">TON</span>
-                </div>
-                {voteError && <p className="text-[10px] text-red-400">{voteError}</p>}
-                <div className="flex gap-2">
-                  <button onClick={() => handleVote('yes')} className="btn-yes flex-1 py-2 rounded-xl text-sm font-bold">✅ ДА</button>
-                  <button onClick={() => handleVote('no')} className="btn-no flex-1 py-2 rounded-xl text-sm font-bold">❌ НЕТ</button>
-                </div>
-              </div>
-            )}
-            {hasVoted && <div className="text-center text-[11px] text-emerald-400 py-2">✅ Ваш голос засчитан</div>}
-
-            {/* Votes list */}
-            {bet.votes.length === 0 ? (
-              <div className="text-center py-6 text-white/30 text-sm">Голосов пока нет</div>
-            ) : (
-              <div className="space-y-2">
-                {bet.votes.map(v => (
-                  <div key={v.id} className="glass-card px-3 py-2 rounded-xl flex items-center justify-between">
-                    <div>
-                      <span className="text-[12px] font-semibold text-white">@{v.username}</span>
-                      <div className="text-[10px] text-white/35">Stake: {v.stake} TON · Rep: {v.reputation}</div>
-                    </div>
-                    <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${v.choice === 'yes' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
-                      {v.choice === 'yes' ? '✅ ДА' : '❌ НЕТ'}
-                    </span>
-                  </div>
+            {/* Tags */}
+            {bet.tags.length > 0 && (
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
+                {bet.tags.map(tag => (
+                  <span key={tag} style={{ fontSize: 10, padding: '2px 7px', borderRadius: 10,
+                                           background: 'rgba(255,255,255,0.06)', color: '#64748b' }}>
+                    #{tag}
+                  </span>
                 ))}
               </div>
             )}
           </div>
         )}
 
-        {tab === 'comments' && (
-          <div className="space-y-3">
-            <div className="flex gap-2">
-              <input
-                className="glass-input flex-1 rounded-xl px-3 py-2 text-[12px]"
-                placeholder="Ваш комментарий..."
+        {/* Comments */}
+        {activeTab === 'comments' && (
+          <div>
+            {/* Add comment */}
+            <div className="glass-card" style={{ padding: 12, marginBottom: 10 }}>
+              <textarea
+                className="form-input"
+                placeholder="Написать комментарий..."
                 value={comment}
                 onChange={e => setComment(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') { addComment(bet.id, comment); setComment(''); } }}
+                rows={2}
+                style={{ marginBottom: 8 }}
               />
-              <button onClick={() => { addComment(bet.id, comment); setComment(''); }}
-                className="btn-primary text-white text-[12px] font-bold px-3 py-2 rounded-xl">
-                →
+              <button
+                className="btn-primary"
+                style={{ padding: '7px 16px', fontSize: 12 }}
+                disabled={!comment.trim()}
+                onClick={() => { addComment(bet.id, comment); setComment(''); }}
+              >
+                Отправить
               </button>
             </div>
-            {bet.comments.length === 0 ? (
-              <div className="text-center py-6 text-white/30 text-sm">Комментариев пока нет</div>
+
+            {bet.comments.length === 0 && (
+              <div style={{ textAlign: 'center', color: '#475569', padding: '30px 0', fontSize: 13 }}>
+                Комментариев пока нет
+              </div>
+            )}
+
+            {bet.comments.map(c => (
+              <div key={c.id} className="glass-card" style={{ padding: '10px 12px', marginBottom: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                  <span style={{ fontSize: 18 }}>{c.avatar}</span>
+                  <div>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: '#94a3b8' }}>@{c.username}</span>
+                    <span style={{ fontSize: 10, color: '#475569', marginLeft: 6 }}>
+                      {formatDistanceToNow(c.timestamp, { locale: ru, addSuffix: true })}
+                    </span>
+                  </div>
+                </div>
+                <p style={{ margin: 0, fontSize: 13, color: '#cbd5e1', lineHeight: 1.5 }}>{c.text}</p>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* All bets */}
+        {activeTab === 'bets' && (
+          <div>
+            {bet.participants.length === 0 ? (
+              <div style={{ textAlign: 'center', color: '#475569', padding: '30px 0', fontSize: 13 }}>
+                Ставок пока нет
+              </div>
             ) : (
-              <div className="space-y-2">
-                {[...bet.comments].reverse().map(c => (
-                  <div key={c.id} className="glass-card px-3 py-2.5 rounded-xl">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="text-base">{c.avatar}</span>
-                      <span className="text-[11px] font-semibold text-white">@{c.username}</span>
-                      <span className="text-[10px] text-white/30">{formatDistanceToNow(c.timestamp, { locale: ru, addSuffix: true })}</span>
-                    </div>
-                    <p className="text-[12px] text-white/70">{c.text}</p>
+              <div className="glass-card" style={{ overflow: 'hidden' }}>
+                {/* Header */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 80px 70px 60px', gap: 8,
+                              padding: '8px 12px', borderBottom: '1px solid rgba(255,255,255,0.05)',
+                              fontSize: 10, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  <span>Участник</span>
+                  <span style={{ textAlign: 'right' }}>Сумма</span>
+                  <span style={{ textAlign: 'center' }}>Позиция</span>
+                  <span style={{ textAlign: 'right' }}>Цена</span>
+                </div>
+                {bet.participants.slice().reverse().map((p, i) => (
+                  <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 80px 70px 60px', gap: 8,
+                                        padding: '8px 12px', borderBottom: i < bet.participants.length - 1 ? '1px solid rgba(255,255,255,0.03)' : 'none',
+                                        fontSize: 12 }}>
+                    <span style={{ color: '#94a3b8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      @{p.username}
+                    </span>
+                    <span style={{ color: '#f1f5f9', fontWeight: 600, textAlign: 'right' }}>
+                      {p.amount.toFixed(2)} TON
+                    </span>
+                    <span style={{ textAlign: 'center' }}>
+                      <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 4, fontWeight: 700,
+                                     background: p.side === 'yes' ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)',
+                                     color: p.side === 'yes' ? '#22c55e' : '#ef4444' }}>
+                        {p.side === 'yes' ? 'ДА' : 'НЕТ'}
+                      </span>
+                    </span>
+                    <span style={{ color: '#64748b', textAlign: 'right' }}>
+                      {Math.round(p.avgPrice * 100)}%
+                    </span>
                   </div>
                 ))}
               </div>

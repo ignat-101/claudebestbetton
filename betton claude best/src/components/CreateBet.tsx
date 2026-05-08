@@ -1,234 +1,231 @@
 import { useState } from 'react';
-import { useStore, type BetCategory, TREASURY_WALLET_ADDRESS } from '../store/useStore';
-import { SECURITY_CONFIG } from '../security/proofOfStake';
+import { useStore, type BetCategory } from '../store/useStore';
 
 const CATEGORIES: { key: BetCategory; label: string; emoji: string }[] = [
-  { key: 'crypto',   label: 'Крипто',   emoji: '₿' },
-  { key: 'sports',   label: 'Спорт',    emoji: '⚽' },
+  { key: 'crypto', label: 'Крипто', emoji: '₿' },
+  { key: 'sports', label: 'Спорт', emoji: '⚽' },
   { key: 'politics', label: 'Политика', emoji: '🏛' },
-  { key: 'news',     label: 'Новости',  emoji: '📰' },
-  { key: 'weather',  label: 'Погода',   emoji: '🌤' },
-  { key: 'custom',   label: 'Другое',   emoji: '✨' },
+  { key: 'news', label: 'Новости', emoji: '📰' },
+  { key: 'custom', label: 'Другое', emoji: '✨' },
 ];
 
 const ORACLE_TYPES = [
-  { key: 'price', label: 'Price Oracle', desc: 'Авто-разрешение по ценовому фиду', emoji: '📊' },
-  { key: 'vote',  label: 'PoS Vote',     desc: 'Разрешение голосованием валидаторов', emoji: '⚖️' },
-  { key: 'manual', label: 'Manual',      desc: 'Ручное разрешение администратором', emoji: '👤' },
-] as const;
+  { key: 'manual', label: '👤 Ручное (Админ решает)' },
+  { key: 'vote', label: '🗳 Голосование сообщества' },
+  { key: 'price', label: '📊 Ценовой оракул' },
+];
 
 export function CreateBet() {
-  const { currentUser, addBet, setActiveTab } = useStore();
+  const { createBet, setActiveTab, tonWalletAddress } = useStore();
 
-  const [form, setForm] = useState({
-    title: '', description: '', category: 'crypto' as BetCategory,
-    resolveDate: '', oracleType: 'vote' as 'price' | 'vote' | 'manual',
-    oracleSymbol: '', oracleTarget: '', oracleDirection: 'above' as 'above' | 'below',
-    tags: '', minBet: SECURITY_CONFIG.MIN_BET_TON,
-  });
-  const [submitted, setSubmitted] = useState(false);
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const [category, setCategory] = useState<BetCategory>('crypto');
+  const [resolveDate, setResolveDate] = useState('');
+  const [oracleType, setOracleType] = useState<'manual' | 'vote' | 'price'>('manual');
+  const [oracleSymbol, setOracleSymbol] = useState('');
+  const [oracleTarget, setOracleTarget] = useState('');
+  const [oracleDirection, setOracleDirection] = useState<'above' | 'below'>('above');
+  const [tagsInput, setTagsInput] = useState('');
+  const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [error, setError] = useState('');
 
-  const validate = () => {
-    const e: Record<string, string> = {};
-    if (!form.title.trim() || form.title.length < 10) e.title = 'Минимум 10 символов';
-    if (!form.description.trim() || form.description.length < 20) e.description = 'Минимум 20 символов';
-    if (!form.resolveDate) e.resolveDate = 'Укажите дату';
-    else if (new Date(form.resolveDate).getTime() < Date.now() + 3600000) e.resolveDate = 'Дата должна быть как минимум через час';
-    if (form.oracleType === 'price' && !form.oracleSymbol) e.oracleSymbol = 'Укажите символ';
-    if (form.oracleType === 'price' && !form.oracleTarget) e.oracleTarget = 'Укажите целевую цену';
-    setErrors(e);
-    return Object.keys(e).length === 0;
-  };
+  const isConnected = !!tonWalletAddress;
+
+  const minDate = new Date(Date.now() + 3600000).toISOString().slice(0, 16);
 
   const handleSubmit = () => {
-    if (!validate()) return;
-    const now = Date.now();
-    const tags = form.tags.split(',').map(t => t.trim()).filter(Boolean).slice(0, 5);
-    addBet({
-      id: `bet_${now}_${Math.random().toString(36).slice(2,8)}`,
-      title: form.title.trim().slice(0, 120),
-      description: form.description.trim().slice(0, 800),
-      category: form.category,
-      creatorId: currentUser.id,
-      creatorUsername: currentUser.username,
-      createdAt: now,
-      resolveAt: new Date(form.resolveDate).getTime(),
-      status: 'pending',
-      outcome: null,
-      yesPool: 0, noPool: 0, totalVolume: 0,
-      yesPrice: 0.5, noPrice: 0.5,
-      participants: [], votes: [], comments: [],
-      priceHistory: [{ time: now, yesPrice: 0.5, noPrice: 0.5, volume: 0 }],
-      oracleType: form.oracleType,
-      oracleSymbol: form.oracleType === 'price' ? form.oracleSymbol : undefined,
-      oracleTarget: form.oracleType === 'price' ? parseFloat(form.oracleTarget) : undefined,
-      oracleDirection: form.oracleType === 'price' ? form.oracleDirection : undefined,
-      adminApproved: currentUser.isAdmin, // instant approval for admin
-      featured: false,
+    if (!title.trim()) { setError('Введите название события'); return; }
+    if (!resolveDate) { setError('Выберите дату разрешения'); return; }
+    if (!isConnected) { setError('Подключите TON кошелёк для создания ставки'); return; }
+
+    const tags = tagsInput.split(',').map(t => t.trim().toLowerCase()).filter(Boolean);
+    const result = createBet({
+      title: title.trim(),
+      description: description.trim(),
+      category,
+      resolveAt: new Date(resolveDate).getTime(),
+      oracleType,
+      oracleSymbol: oracleType === 'price' ? oracleSymbol : undefined,
+      oracleTarget: oracleType === 'price' ? parseFloat(oracleTarget) : undefined,
+      oracleDirection: oracleType === 'price' ? oracleDirection : undefined,
       tags,
-      feePercent: SECURITY_CONFIG.PLATFORM_FEE_PCT * 100,
-      treasuryWallet: TREASURY_WALLET_ADDRESS,
-      minBetTon: Math.max(SECURITY_CONFIG.MIN_BET_TON, form.minBet),
-      maxSlippagePct: 5,
     });
-    setSubmitted(true);
+
+    if (result.ok) {
+      setStatus('success');
+      setTimeout(() => { setStatus('idle'); setActiveTab('bets'); }, 2000);
+    } else {
+      setError(result.error || 'Ошибка');
+      setStatus('error');
+    }
   };
 
-  if (submitted) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full bg-mesh px-8 text-center">
-        <div className="text-5xl mb-4 animate-float">🎉</div>
-        <h2 className="text-xl font-black text-white mb-2">Ставка создана!</h2>
-        <p className="text-white/50 text-sm leading-relaxed">
-          {currentUser.isAdmin ? 'Ставка автоматически одобрена и опубликована.' : 'Ставка отправлена на модерацию. После одобрения она появится в списке.'}
-        </p>
-        <button onClick={() => setActiveTab('bets')}
-          className="mt-6 btn-primary text-white text-sm font-bold px-6 py-3 rounded-xl">
-          → К ставкам
-        </button>
-      </div>
-    );
-  }
-
   return (
-    <div className="flex flex-col h-full bg-mesh">
-      <div className="flex-shrink-0 px-4 pt-4 pb-2">
-        <h1 className="text-xl font-black text-white mb-0.5">Создать ставку</h1>
-        <p className="text-[11px] text-white/40">Ставки проходят модерацию перед публикацией</p>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div style={{ padding: '16px 16px 12px', flexShrink: 0 }}>
+        <h1 style={{ fontSize: 18, fontWeight: 800, color: '#f1f5f9', margin: 0 }}>Создать рынок</h1>
+        <p style={{ fontSize: 12, color: '#475569', margin: '3px 0 0' }}>
+          Создайте событие для голосования сообщества
+        </p>
       </div>
 
-      <div className="flex-1 overflow-y-auto scroll-content px-4 pb-4 space-y-3">
-        {/* Title */}
-        <div>
-          <label className="text-[10px] text-white/40 uppercase tracking-wider mb-1 block">Вопрос</label>
-          <input
-            className={`glass-input w-full rounded-xl px-3 py-2.5 text-[13px] ${errors.title ? 'border-red-500/50' : ''}`}
-            placeholder="Например: Bitcoin достигнет $150k до конца года?"
-            value={form.title}
-            onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
-          />
-          {errors.title && <p className="text-[10px] text-red-400 mt-1">{errors.title}</p>}
-        </div>
-
-        {/* Description */}
-        <div>
-          <label className="text-[10px] text-white/40 uppercase tracking-wider mb-1 block">Описание и источник</label>
-          <textarea
-            className={`glass-input w-full rounded-xl px-3 py-2.5 text-[12px] resize-none ${errors.description ? 'border-red-500/50' : ''}`}
-            rows={3}
-            placeholder="Опишите условия разрешения ставки и источник информации..."
-            value={form.description}
-            onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
-          />
-          {errors.description && <p className="text-[10px] text-red-400 mt-1">{errors.description}</p>}
-        </div>
-
-        {/* Category */}
-        <div>
-          <label className="text-[10px] text-white/40 uppercase tracking-wider mb-1.5 block">Категория</label>
-          <div className="flex flex-wrap gap-2">
-            {CATEGORIES.map(c => (
-              <button key={c.key}
-                onClick={() => setForm(f => ({ ...f, category: c.key }))}
-                className={`chip ${form.category === c.key ? 'active' : ''}`}>
-                {c.emoji} {c.label}
-              </button>
-            ))}
+      <div className="scroll-area" style={{ flex: 1, padding: '0 16px 16px' }}>
+        {status === 'success' ? (
+          <div style={{ textAlign: 'center', padding: '60px 20px' }}>
+            <div style={{ fontSize: 48, marginBottom: 12 }}>✅</div>
+            <h2 style={{ color: '#22c55e', marginBottom: 8 }}>Заявка отправлена!</h2>
+            <p style={{ color: '#64748b', fontSize: 13 }}>
+              Ваш рынок проходит проверку администратора. После одобрения он появится в списке.
+            </p>
           </div>
-        </div>
+        ) : (
+          <>
+            {!isConnected && (
+              <div style={{ padding: '10px 14px', borderRadius: 8, background: 'rgba(245,158,11,0.1)',
+                            border: '1px solid rgba(245,158,11,0.2)', color: '#fbbf24', fontSize: 12, marginBottom: 14 }}>
+                ⚠️ Подключите TON кошелёк для создания рынка
+              </div>
+            )}
 
-        {/* Oracle type */}
-        <div>
-          <label className="text-[10px] text-white/40 uppercase tracking-wider mb-1.5 block">Тип разрешения</label>
-          <div className="space-y-1.5">
-            {ORACLE_TYPES.map(o => (
-              <button key={o.key}
-                onClick={() => setForm(f => ({ ...f, oracleType: o.key }))}
-                className={`w-full glass-card p-3 rounded-xl text-left transition-all ${form.oracleType === o.key ? 'ring-1 ring-purple-400/50 bg-purple-500/10' : 'hover:bg-white/5'}`}>
-                <div className="flex items-center gap-2">
-                  <span className="text-lg">{o.emoji}</span>
+            {/* Title */}
+            <div style={{ marginBottom: 14 }}>
+              <div className="section-label" style={{ marginBottom: 6 }}>Вопрос события *</div>
+              <input
+                className="form-input"
+                placeholder="Bitcoin достигнет $150,000 до конца 2025?"
+                value={title}
+                onChange={e => setTitle(e.target.value)}
+                maxLength={200}
+              />
+              <div style={{ fontSize: 10, color: '#475569', textAlign: 'right', marginTop: 3 }}>
+                {title.length}/200
+              </div>
+            </div>
+
+            {/* Description */}
+            <div style={{ marginBottom: 14 }}>
+              <div className="section-label" style={{ marginBottom: 6 }}>Описание</div>
+              <textarea
+                className="form-input"
+                placeholder="Опишите условия, источники данных и критерии разрешения..."
+                value={description}
+                onChange={e => setDescription(e.target.value)}
+                rows={3}
+                maxLength={1000}
+              />
+            </div>
+
+            {/* Category */}
+            <div style={{ marginBottom: 14 }}>
+              <div className="section-label" style={{ marginBottom: 8 }}>Категория</div>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {CATEGORIES.map(c => (
+                  <button
+                    key={c.key}
+                    onClick={() => setCategory(c.key)}
+                    style={{ padding: '7px 14px', borderRadius: 8, fontSize: 13, fontWeight: 500,
+                             background: category === c.key ? 'rgba(59,130,246,0.2)' : 'rgba(255,255,255,0.05)',
+                             border: `1px solid ${category === c.key ? 'rgba(59,130,246,0.4)' : 'rgba(255,255,255,0.08)'}`,
+                             color: category === c.key ? '#60a5fa' : '#94a3b8', cursor: 'pointer' }}>
+                    {c.emoji} {c.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Resolve date */}
+            <div style={{ marginBottom: 14 }}>
+              <div className="section-label" style={{ marginBottom: 6 }}>Дата разрешения *</div>
+              <input
+                type="datetime-local"
+                className="form-input"
+                min={minDate}
+                value={resolveDate}
+                onChange={e => setResolveDate(e.target.value)}
+              />
+            </div>
+
+            {/* Oracle type */}
+            <div style={{ marginBottom: 14 }}>
+              <div className="section-label" style={{ marginBottom: 8 }}>Тип разрешения</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {ORACLE_TYPES.map(o => (
+                  <button
+                    key={o.key}
+                    onClick={() => setOracleType(o.key as 'manual' | 'vote' | 'price')}
+                    style={{ padding: '9px 14px', borderRadius: 8, fontSize: 13, textAlign: 'left',
+                             background: oracleType === o.key ? 'rgba(59,130,246,0.15)' : 'rgba(255,255,255,0.04)',
+                             border: `1px solid ${oracleType === o.key ? 'rgba(59,130,246,0.35)' : 'rgba(255,255,255,0.07)'}`,
+                             color: oracleType === o.key ? '#60a5fa' : '#94a3b8', cursor: 'pointer' }}>
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Oracle symbol (if price) */}
+            {oracleType === 'price' && (
+              <div className="glass-card" style={{ padding: 12, marginBottom: 14 }}>
+                <div className="section-label" style={{ marginBottom: 8 }}>Настройки оракула</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
                   <div>
-                    <p className="text-[12px] font-bold text-white">{o.label}</p>
-                    <p className="text-[10px] text-white/40">{o.desc}</p>
+                    <div style={{ fontSize: 11, color: '#64748b', marginBottom: 4 }}>Символ (BTC, ETH...)</div>
+                    <input className="form-input" placeholder="BTC" value={oracleSymbol}
+                           onChange={e => setOracleSymbol(e.target.value.toUpperCase())} />
                   </div>
-                  {form.oracleType === o.key && <span className="ml-auto text-purple-400 text-sm">✓</span>}
+                  <div>
+                    <div style={{ fontSize: 11, color: '#64748b', marginBottom: 4 }}>Целевая цена (USD)</div>
+                    <input type="number" className="form-input" placeholder="100000"
+                           value={oracleTarget} onChange={e => setOracleTarget(e.target.value)} />
+                  </div>
                 </div>
-              </button>
-            ))}
-          </div>
-        </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  {(['above', 'below'] as const).map(d => (
+                    <button key={d} onClick={() => setOracleDirection(d)}
+                      style={{ flex: 1, padding: '7px', fontSize: 12, borderRadius: 8,
+                               background: oracleDirection === d ? 'rgba(59,130,246,0.2)' : 'rgba(255,255,255,0.05)',
+                               border: `1px solid ${oracleDirection === d ? 'rgba(59,130,246,0.4)' : 'rgba(255,255,255,0.08)'}`,
+                               color: oracleDirection === d ? '#60a5fa' : '#94a3b8', cursor: 'pointer' }}>
+                      {d === 'above' ? '↑ Выше' : '↓ Ниже'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
-        {/* Price oracle params */}
-        {form.oracleType === 'price' && (
-          <div className="space-y-2 animate-fadeIn">
-            <div>
-              <label className="text-[10px] text-white/40 uppercase tracking-wider mb-1 block">CoinGecko ID</label>
-              <input className={`glass-input w-full rounded-xl px-3 py-2 text-[12px] ${errors.oracleSymbol ? 'border-red-500/50' : ''}`}
-                placeholder="bitcoin, ethereum, the-open-network..."
-                value={form.oracleSymbol}
-                onChange={e => setForm(f => ({ ...f, oracleSymbol: e.target.value }))} />
-              {errors.oracleSymbol && <p className="text-[10px] text-red-400 mt-1">{errors.oracleSymbol}</p>}
+            {/* Tags */}
+            <div style={{ marginBottom: 16 }}>
+              <div className="section-label" style={{ marginBottom: 6 }}>Теги (через запятую)</div>
+              <input
+                className="form-input"
+                placeholder="btc, bitcoin, crypto"
+                value={tagsInput}
+                onChange={e => setTagsInput(e.target.value)}
+              />
             </div>
-            <div className="flex gap-2">
-              <div className="flex-1">
-                <label className="text-[10px] text-white/40 uppercase tracking-wider mb-1 block">Цель ($)</label>
-                <input type="number" className={`glass-input w-full rounded-xl px-3 py-2 text-[12px] ${errors.oracleTarget ? 'border-red-500/50' : ''}`}
-                  placeholder="120000"
-                  value={form.oracleTarget}
-                  onChange={e => setForm(f => ({ ...f, oracleTarget: e.target.value }))} />
-                {errors.oracleTarget && <p className="text-[10px] text-red-400 mt-1">{errors.oracleTarget}</p>}
+
+            {error && (
+              <div style={{ padding: '9px 12px', borderRadius: 8, background: 'rgba(239,68,68,0.1)',
+                            border: '1px solid rgba(239,68,68,0.2)', color: '#f87171', fontSize: 13, marginBottom: 12 }}>
+                ⚠️ {error}
               </div>
-              <div className="flex-1">
-                <label className="text-[10px] text-white/40 uppercase tracking-wider mb-1 block">Направление</label>
-                <div className="flex gap-1">
-                  <button onClick={() => setForm(f => ({ ...f, oracleDirection: 'above' }))}
-                    className={`flex-1 py-2 rounded-xl text-[11px] font-bold transition-all ${form.oracleDirection === 'above' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40' : 'glass text-white/40'}`}>
-                    ↑ Выше
-                  </button>
-                  <button onClick={() => setForm(f => ({ ...f, oracleDirection: 'below' }))}
-                    className={`flex-1 py-2 rounded-xl text-[11px] font-bold transition-all ${form.oracleDirection === 'below' ? 'bg-red-500/20 text-red-400 border border-red-500/40' : 'glass text-white/40'}`}>
-                    ↓ Ниже
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
+            )}
+
+            <button
+              className="btn-primary"
+              style={{ width: '100%', padding: '12px', fontSize: 14 }}
+              onClick={handleSubmit}
+              disabled={!isConnected}
+            >
+              Отправить на проверку
+            </button>
+
+            <p style={{ textAlign: 'center', fontSize: 11, color: '#475569', marginTop: 10 }}>
+              После проверки администратором рынок станет доступен всем
+            </p>
+          </>
         )}
-
-        {/* Resolve date */}
-        <div>
-          <label className="text-[10px] text-white/40 uppercase tracking-wider mb-1 block">Дата разрешения</label>
-          <input type="datetime-local"
-            className={`glass-input w-full rounded-xl px-3 py-2 text-[12px] ${errors.resolveDate ? 'border-red-500/50' : ''}`}
-            value={form.resolveDate}
-            min={new Date(Date.now() + 3600000).toISOString().slice(0,16)}
-            onChange={e => setForm(f => ({ ...f, resolveDate: e.target.value }))} />
-          {errors.resolveDate && <p className="text-[10px] text-red-400 mt-1">{errors.resolveDate}</p>}
-        </div>
-
-        {/* Tags */}
-        <div>
-          <label className="text-[10px] text-white/40 uppercase tracking-wider mb-1 block">Теги (через запятую)</label>
-          <input className="glass-input w-full rounded-xl px-3 py-2 text-[12px]"
-            placeholder="BTC, Crypto, Bull Run"
-            value={form.tags}
-            onChange={e => setForm(f => ({ ...f, tags: e.target.value }))} />
-        </div>
-
-        {/* Security note */}
-        <div className="glass px-3 py-2 rounded-xl flex items-start gap-2">
-          <span className="text-base">🔐</span>
-          <div className="text-[10px] text-white/35 leading-relaxed">
-            Все ставки проходят модерацию. Комиссия платформы {SECURITY_CONFIG.PLATFORM_FEE_PCT * 100}% · Валидаторам {SECURITY_CONFIG.VALIDATOR_REWARD_PCT * 100}%. AMM ценообразование + PoS защита.
-          </div>
-        </div>
-
-        {/* Submit */}
-        <button onClick={handleSubmit}
-          className="btn-primary w-full text-white text-sm font-bold py-3 rounded-xl">
-          🚀 Создать ставку
-        </button>
       </div>
     </div>
   );
