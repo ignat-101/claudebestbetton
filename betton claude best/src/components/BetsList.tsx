@@ -3,12 +3,12 @@ import { useStore, type BetCategory } from '../store/useStore';
 import { BetCard } from './BetCard';
 
 const CATEGORIES: { key: BetCategory | 'all'; label: string }[] = [
-  { key: 'all', label: 'Все' },
-  { key: 'crypto', label: '₿ Крипто' },
-  { key: 'sports', label: '⚽ Спорт' },
+  { key: 'all',      label: '🔥 Все' },
+  { key: 'crypto',   label: '₿ Крипто' },
+  { key: 'sports',   label: '⚽ Спорт' },
   { key: 'politics', label: '🏛 Политика' },
-  { key: 'news', label: '📰 Новости' },
-  { key: 'custom', label: '✨ Другое' },
+  { key: 'news',     label: '📰 Новости' },
+  { key: 'custom',   label: '✨ Другое' },
 ];
 
 export function BetsList() {
@@ -16,7 +16,7 @@ export function BetsList() {
           setSelectedBetId, setActiveTab } = useStore();
 
   const filtered = useMemo(() => {
-    let list = bets.filter(b => b.adminApproved && b.status !== 'cancelled');
+    let list = bets.filter(b => b.status !== 'cancelled');
     if (filterCategory !== 'all') list = list.filter(b => b.category === filterCategory);
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
@@ -36,7 +36,7 @@ export function BetsList() {
   }, [bets, filterCategory, searchQuery]);
 
   const featured = filtered.filter(b => b.featured && b.status === 'active');
-  const regular = filtered.filter(b => !(b.featured && b.status === 'active'));
+  const regular  = filtered.filter(b => !(b.featured && b.status === 'active'));
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -45,9 +45,9 @@ export function BetsList() {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
           <div>
             <h1 style={{ fontSize: 20, fontWeight: 800, color: '#f1f5f9', margin: 0 }}>
-              FlashBet <span style={{ color: '#3b82f6' }}>TON</span>
+              Betton <span style={{ color: '#3b82f6' }}>TON</span>
             </h1>
-            <p style={{ fontSize: 11, color: '#475569', margin: 0 }}>Рынок предсказаний на блокчейне TON</p>
+            <p style={{ fontSize: 11, color: '#475569', margin: 0 }}>Рынки предсказаний на блокчейне</p>
           </div>
           <button
             onClick={() => setActiveTab('create')}
@@ -58,7 +58,6 @@ export function BetsList() {
           </button>
         </div>
 
-        {/* Search */}
         <input
           className="search-input"
           placeholder="🔍 Поиск событий..."
@@ -67,9 +66,7 @@ export function BetsList() {
           style={{ marginBottom: 10 }}
         />
 
-        {/* Categories */}
-        <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 2 }}
-             className="hide-scroll">
+        <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 2 }} className="hide-scroll">
           {CATEGORIES.map(cat => (
             <button
               key={cat.key}
@@ -86,8 +83,8 @@ export function BetsList() {
       <div className="scroll-area" style={{ flex: 1, padding: '0 16px 16px' }}>
         {featured.length > 0 && (
           <div style={{ marginBottom: 16 }}>
-            <div className="section-label" style={{ marginBottom: 8 }}>🔥 Популярные</div>
-            <div className="markets-grid" style={{ display: 'grid', gap: 10 }}>
+            <div className="section-label" style={{ marginBottom: 8 }}>⭐ Популярные</div>
+            <div style={{ display: 'grid', gap: 10 }}>
               {featured.map(bet => (
                 <BetCard key={bet.id} bet={bet} onClick={() => setSelectedBetId(bet.id)} />
               ))}

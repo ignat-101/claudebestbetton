@@ -1,109 +1,59 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { computePosResult, type WeightedVote } from '../security/proofOfStake';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-export type BetCategory = 'crypto' | 'weather' | 'sports' | 'politics' | 'custom' | 'news';
-export type BetStatus = 'pending' | 'active' | 'voting' | 'resolved' | 'cancelled';
-export type BetOutcome = 'yes' | 'no' | null;
+// ─────────────────────────────────────────────────────────────────────────────
+// TYPES
+// ─────────────────────────────────────────────────────────────────────────────
 
-export interface UserBet {
-  betId: string;
-  userId: string;
-  walletAddress: string;
-  username: string;
-  side: 'yes' | 'no';
-  amount: number;
-  shares: number;
-  timestamp: number;
-  avgPrice: number;
-  txHash: string;
-  confirmed: boolean;
-}
+export type BetCategory = 'crypto' | 'sports' | 'politics' | 'news' | 'custom';
+export type BetStatus = 'active' | 'voting' | 'resolved' | 'cancelled';
+export type OracleType = 'vote' | 'price';
+export type Tab = 'bets' | 'create' | 'portfolio' | 'vote' | 'profile';
 
 export interface PricePoint {
   time: number;
   yesPrice: number;
   noPrice: number;
-  volume: number;
+}
+
+export interface OrderbookEntry {
+  price: number;
+  size: number;
+  side: 'yes' | 'no';
+}
+
+export interface Participant {
+  userId: string;
+  username: string;
+  side: 'yes' | 'no';
+  amount: number;
+  txHash: string;
+  time: number;
+  expectedPrice: number;
+  filledPrice?: number;
+  pnl?: number;
 }
 
 export interface Comment {
   id: string;
   userId: string;
   username: string;
-  avatar: string;
   text: string;
-  timestamp: number;
+  time: number;
   likes: number;
 }
 
-export interface Vote {
-  id: string;
+export interface PosVote {
   userId: string;
+  username: string;
   walletAddress: string;
   choice: 'yes' | 'no';
   stake: number;
-  timestamp: number;
-  weight: number;
-}
-
-export interface TonDomain {
-  domain: string;
-  verified: boolean;
-  linkedAt: number;
-}
-
-export interface AppNotification {
-  id: string;
-  type: 'win' | 'loss' | 'vote_reward' | 'referral' | 'admin' | 'system' | 'security';
-  title: string;
-  message: string;
-  timestamp: number;
-  read: boolean;
-}
-
-export interface Transaction {
-  id: string;
-  userId: string;
-  type: 'bet' | 'win' | 'refund' | 'fee' | 'referral' | 'vote_reward' | 'deposit' | 'withdrawal';
-  amount: number;
-  betId?: string;
-  timestamp: number;
-  description: string;
-  txHash?: string;
-  onChainConfirmed: boolean;
-}
-
-export interface User {
-  id: string;
-  telegramId: number;
-  username: string;
-  firstName: string;
-  lastName?: string;
-  avatar: string;
-  tonBalance: number;
-  totalWagered: number;
-  totalWon: number;
-  totalLost: number;
   reputation: number;
-  activeBets: string[];
-  resolvedBets: string[];
-  votedBets: string[];
-  referralCode: string;
-  referredBy?: string;
-  referrals: string[];
-  referralEarnings: number;
-  joinedAt: number;
-  lastActive: number;
-  isAdmin: boolean;
-  notifications: AppNotification[];
-  walletAddress?: string;
-  tonDomains: TonDomain[];
-  bio?: string;
-  profilePublic: boolean;
-  winStreak: number;
-  maxWinStreak: number;
-  rank: 'novice' | 'player' | 'expert' | 'legend' | 'whale';
+  timestamp: number;
+  txHash: string;
+  stakeAge: number;
+  confidence: number;
 }
 
 export interface Bet {
@@ -116,538 +66,493 @@ export interface Bet {
   createdAt: number;
   resolveAt: number;
   status: BetStatus;
-  outcome: BetOutcome;
-  yesPool: number;
-  noPool: number;
-  totalVolume: number;
-  yesPrice: number;
-  noPrice: number;
-  participants: UserBet[];
-  votes: Vote[];
-  comments: Comment[];
-  priceHistory: PricePoint[];
-  oracleType: 'price' | 'vote' | 'manual';
+  oracleType: OracleType;
   oracleSymbol?: string;
   oracleTarget?: number;
   oracleDirection?: 'above' | 'below';
-  adminApproved: boolean;
-  featured: boolean;
-  tags: string[];
-  feePercent: number;
-  treasuryWallet: string;
-  minBetTon: number;
-  maxSlippagePct: number;
-}
-
-export interface FinancialMetrics {
+  yesPrice: number;
+  noPrice: number;
   totalVolume: number;
-  totalFees: number;
-  totalPayouts: number;
-  activeBetsCount: number;
-  resolvedBetsCount: number;
-  platformRevenue: number;
-  avgBetSize: number;
-  dailyVolume: number;
-  weeklyVolume: number;
+  yesVolume: number;
+  noVolume: number;
+  participants: Participant[];
+  comments: Comment[];
+  priceHistory: PricePoint[];
+  posVotes: PosVote[];
+  tags: string[];
+  featured: boolean;
+  resolved?: boolean;
+  resolvedOutcome?: 'yes' | 'no';
+  yesOrders: OrderbookEntry[];
+  noOrders: OrderbookEntry[];
 }
 
-// ─── Constants ─────────────────────────────────────────────────────────────────
-export const TREASURY_WALLET = 'UQCfdyrb0Fj8lA32OfizTwGY829tTzihsEYl1FrpBzeVKdi0';
-export const PLATFORM_FEE_PCT = 0.02;
-export const MIN_BET_TON = 0.1;
-
-export function computeRank(rep: number): User['rank'] {
-  if (rep >= 1000) return 'whale';
-  if (rep >= 500) return 'legend';
-  if (rep >= 200) return 'expert';
-  if (rep >= 50) return 'player';
-  return 'novice';
+export interface User {
+  id: string;
+  walletAddress: string;
+  username: string;
+  joinedAt: number;
+  reputation: number;
+  stakedAmount: number;
+  stakeAge: number;
+  totalBets: number;
+  wins: number;
+  losses: number;
+  totalVolume: number;
+  pnl: number;
+  referralCode: string;
+  referredBy?: string;
+  isAdmin?: boolean;
+  avatarEmoji: string;
+  badges: string[];
+  posVotingPower: number;
 }
 
-export const RANK_META: Record<User['rank'], { label: string; emoji: string; color: string }> = {
-  novice:  { label: 'Новичок',  emoji: '🌱', color: 'text-gray-400' },
-  player:  { label: 'Игрок',    emoji: '🎯', color: 'text-blue-400' },
-  expert:  { label: 'Эксперт',  emoji: '⭐', color: 'text-purple-400' },
-  legend:  { label: 'Легенда',  emoji: '🏆', color: 'text-amber-400' },
-  whale:   { label: 'Кит',      emoji: '🐳', color: 'text-emerald-400' },
-};
+// ─────────────────────────────────────────────────────────────────────────────
+// HELPERS
+// ─────────────────────────────────────────────────────────────────────────────
 
-// AMM price calculation
-function calcAmmPrice(yesPool: number, noPool: number): { yes: number; no: number } {
-  const total = yesPool + noPool;
-  if (total === 0) return { yes: 0.5, no: 0.5 };
-  return {
-    yes: noPool / total,
-    no: yesPool / total,
-  };
+function generateId(): string {
+  return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 }
 
-function calcShares(amount: number, pool: number, oppositePool: number): number {
-  const k = pool * oppositePool;
-  const newOpposite = k / (pool + amount);
-  return oppositePool - newOpposite;
+function walletToUsername(addr: string): string {
+  return addr.slice(0, 4).toUpperCase() + '…' + addr.slice(-4).toUpperCase();
 }
 
-// ─── Demo Data ─────────────────────────────────────────────────────────────────
-const NOW = Date.now();
-const DAY = 86400000;
+function updateAmmPrice(
+  yesVol: number, noVol: number, side: 'yes' | 'no', amount: number
+): { yesPrice: number; noPrice: number; yesVol: number; noVol: number } {
+  const newYesVol = yesVol + (side === 'yes' ? amount : 0);
+  const newNoVol  = noVol  + (side === 'no'  ? amount : 0);
+  const total = newYesVol + newNoVol;
+  if (total === 0) return { yesPrice: 0.5, noPrice: 0.5, yesVol: newYesVol, noVol: newNoVol };
+  const yesPrice = Math.min(0.97, Math.max(0.03, newYesVol / total));
+  const noPrice  = 1 - yesPrice;
+  return { yesPrice, noPrice, yesVol: newYesVol, noVol: newNoVol };
+}
 
-function makePriceHistory(days: number, startYes: number): PricePoint[] {
-  const pts: PricePoint[] = [];
-  let y = startYes;
-  for (let i = days; i >= 0; i--) {
-    y = Math.min(0.97, Math.max(0.03, y + (Math.random() - 0.5) * 0.06));
-    pts.push({
-      time: NOW - i * DAY / 4,
-      yesPrice: y,
-      noPrice: 1 - y,
-      volume: Math.random() * 50 + 5,
-    });
+function buildOrderbook(yesPrice: number, liquidity: number): { yesOrders: OrderbookEntry[]; noOrders: OrderbookEntry[] } {
+  const yesOrders: OrderbookEntry[] = [];
+  const noOrders: OrderbookEntry[] = [];
+  const spread = 0.01;
+  for (let i = 0; i < 5; i++) {
+    const priceStep = i * 0.02;
+    const size = Math.max(0.1, liquidity * (0.1 + Math.random() * 0.08) * (1 - i * 0.12));
+    yesOrders.push({ price: Math.min(0.97, yesPrice + spread + priceStep), size: +size.toFixed(2), side: 'yes' });
+    noOrders.push({ price: Math.min(0.97, (1 - yesPrice) + spread + priceStep), size: +size.toFixed(2), side: 'no' });
   }
-  return pts;
+  return { yesOrders, noOrders };
 }
 
-function makeBet(
-  id: string, title: string, desc: string, cat: BetCategory,
-  yesPool: number, noPool: number, resolveInDays: number,
-  status: BetStatus = 'active', featured = false,
-  oracleType: 'price' | 'vote' | 'manual' = 'manual',
-  tags: string[] = [],
-  participants: UserBet[] = [],
-): Bet {
-  const prices = calcAmmPrice(yesPool, noPool);
-  return {
-    id, title, description: desc, category: cat,
-    creatorId: 'admin', creatorUsername: 'FlashBet',
-    createdAt: NOW - DAY * 2,
-    resolveAt: NOW + DAY * resolveInDays,
-    status, outcome: null,
-    yesPool, noPool,
-    totalVolume: yesPool + noPool,
-    yesPrice: prices.yes, noPrice: prices.no,
-    participants,
-    votes: [], comments: [],
-    priceHistory: makePriceHistory(20, prices.yes),
-    oracleType,
-    adminApproved: true, featured,
-    tags,
-    feePercent: PLATFORM_FEE_PCT,
-    treasuryWallet: TREASURY_WALLET,
-    minBetTon: MIN_BET_TON,
-    maxSlippagePct: 0.05,
-  };
+function generatePriceHistory(currentYes: number, points = 24): PricePoint[] {
+  const now = Date.now();
+  const history: PricePoint[] = [];
+  let price = 0.5 + (Math.random() - 0.5) * 0.3;
+  for (let i = points; i >= 0; i--) {
+    price += (Math.random() - 0.5) * 0.06;
+    price = Math.min(0.95, Math.max(0.05, price));
+    history.push({ time: now - i * 3600000, yesPrice: price, noPrice: 1 - price });
+  }
+  history[history.length - 1] = { time: now, yesPrice: currentYes, noPrice: 1 - currentYes };
+  return history;
 }
 
-const DEMO_PARTICIPANTS: UserBet[] = [
-  {
-    betId: 'b1', userId: 'u2', walletAddress: 'EQ...abc', username: 'crypto_whale',
-    side: 'yes', amount: 150, shares: 120, timestamp: NOW - DAY, avgPrice: 0.62,
-    txHash: 'tx1', confirmed: true,
-  },
-  {
-    betId: 'b1', userId: 'u3', walletAddress: 'EQ...def', username: 'moon_hunter',
-    side: 'no', amount: 80, shares: 65, timestamp: NOW - DAY * 0.5, avgPrice: 0.38,
-    txHash: 'tx2', confirmed: true,
-  },
-  {
-    betId: 'b2', userId: 'u2', walletAddress: 'EQ...abc', username: 'crypto_whale',
-    side: 'yes', amount: 200, shares: 180, timestamp: NOW - DAY * 1.5, avgPrice: 0.71,
-    txHash: 'tx3', confirmed: true,
-  },
-];
+function makeEmptyBets(): Bet[] {
+  const templates = [
+    {
+      title: 'Bitcoin выше $120,000 до конца 2025?',
+      description: 'Достигнет ли цена BTC отметки $120k до 31 декабря 2025 года согласно данным Binance?',
+      category: 'crypto' as BetCategory,
+      oracleType: 'price' as OracleType,
+      oracleSymbol: 'BTC',
+      oracleTarget: 120000,
+      oracleDirection: 'above' as const,
+      featured: true,
+      tags: ['bitcoin', 'btc', 'crypto'],
+      yesBias: 0.62,
+    },
+    {
+      title: 'ETH достигнет $5,000 в 2025?',
+      description: 'Ethereum преодолеет ли отметку $5,000 до конца 2025 года?',
+      category: 'crypto' as BetCategory,
+      oracleType: 'price' as OracleType,
+      oracleSymbol: 'ETH',
+      oracleTarget: 5000,
+      oracleDirection: 'above' as const,
+      featured: false,
+      tags: ['ethereum', 'eth'],
+      yesBias: 0.45,
+    },
+    {
+      title: 'TON войдёт в топ-5 по капитализации?',
+      description: 'Займёт ли TON место в топ-5 криптовалют по рыночной капитализации в 2025?',
+      category: 'crypto' as BetCategory,
+      oracleType: 'vote' as OracleType,
+      featured: true,
+      tags: ['ton', 'telegram'],
+      yesBias: 0.71,
+    },
+    {
+      title: 'Реал Мадрид выиграет Лигу Чемпионов 25/26?',
+      description: 'Победит ли Real Madrid в UEFA Champions League в сезоне 2025/26?',
+      category: 'sports' as BetCategory,
+      oracleType: 'vote' as OracleType,
+      featured: false,
+      tags: ['football', 'ucl', 'realmadrid'],
+      yesBias: 0.38,
+    },
+    {
+      title: 'США примут закон о регулировании DeFi в 2025?',
+      description: 'Примет ли Конгресс США специальный закон о DeFi до конца 2025?',
+      category: 'politics' as BetCategory,
+      oracleType: 'vote' as OracleType,
+      featured: false,
+      tags: ['defi', 'usa', 'regulation'],
+      yesBias: 0.28,
+    },
+  ];
 
-export const DEMO_USERS: User[] = [
-  {
-    id: 'u2', telegramId: 1002, username: 'crypto_whale', firstName: 'Alex',
-    avatar: '🐳', tonBalance: 2500, totalWagered: 4200, totalWon: 5100, totalLost: 1900,
-    reputation: 850, activeBets: ['b1', 'b2'], resolvedBets: ['b3', 'b4', 'b5'],
-    votedBets: [], referralCode: 'WHALE1', referrals: ['u5'], referralEarnings: 42,
-    joinedAt: NOW - DAY * 120, lastActive: NOW - 3600000,
-    isAdmin: false, notifications: [],
-    walletAddress: 'EQD_abc123def456ghi789',
-    tonDomains: [{ domain: 'alexwhale.ton', verified: true, linkedAt: NOW - DAY * 30 }],
-    bio: 'Trading since 2021. Crypto maximalist.',
-    profilePublic: true, winStreak: 4, maxWinStreak: 8,
-    rank: 'legend',
-  },
-  {
-    id: 'u3', telegramId: 1003, username: 'moon_hunter', firstName: 'Maria',
-    avatar: '🌙', tonBalance: 890, totalWagered: 1200, totalWon: 980, totalLost: 620,
-    reputation: 320, activeBets: ['b1'], resolvedBets: ['b6'],
-    votedBets: [], referralCode: 'MOON22', referrals: [], referralEarnings: 0,
-    joinedAt: NOW - DAY * 45, lastActive: NOW - 7200000,
-    isAdmin: false, notifications: [],
-    tonDomains: [],
-    bio: 'To the moon! 🚀',
-    profilePublic: true, winStreak: 2, maxWinStreak: 5,
-    rank: 'expert',
-  },
-];
+  const now = Date.now();
+  return templates.map((t, i) => {
+    const yp = t.yesBias;
+    const { yesOrders, noOrders } = buildOrderbook(yp, 0);
+    return {
+      id: `seed-${i}`,
+      title: t.title,
+      description: t.description,
+      category: t.category,
+      creatorId: 'system',
+      creatorUsername: 'betton',
+      createdAt: now - (5 - i) * 86400000,
+      resolveAt: now + (30 + i * 10) * 86400000,
+      status: 'active' as BetStatus,
+      oracleType: t.oracleType,
+      oracleSymbol: (t as {oracleSymbol?: string}).oracleSymbol,
+      oracleTarget: (t as {oracleTarget?: number}).oracleTarget,
+      oracleDirection: (t as {oracleDirection?: 'above' | 'below'}).oracleDirection,
+      yesPrice: yp,
+      noPrice: 1 - yp,
+      totalVolume: 0,
+      yesVolume: 0,
+      noVolume: 0,
+      participants: [],
+      comments: [],
+      priceHistory: generatePriceHistory(yp),
+      posVotes: [],
+      tags: t.tags,
+      featured: t.featured,
+      yesOrders,
+      noOrders,
+    };
+  });
+}
 
-const INITIAL_BETS: Bet[] = [
-  makeBet('b1', 'Bitcoin достигнет $120,000 до конца июля 2025?', 
-    'Достигнет ли BTC отметки $120,000 до 31 июля 2025 года? Решение по данным CoinGecko.',
-    'crypto', 1840, 760, 18, 'active', true, 'price', ['btc', 'bitcoin', 'crypto'],
-    DEMO_PARTICIPANTS.slice(0, 2)),
+// ─────────────────────────────────────────────────────────────────────────────
+// STORE
+// ─────────────────────────────────────────────────────────────────────────────
 
-  makeBet('b2', 'TON войдёт в топ-5 по капитализации в 2025?',
-    'Войдёт ли Toncoin в топ-5 криптовалют по рыночной капитализации до конца 2025 года?',
-    'crypto', 3200, 1100, 45, 'active', true, 'price', ['ton', 'toncoin'],
-    [DEMO_PARTICIPANTS[2]]),
-
-  makeBet('b3', 'Ethereum перейдёт на proof-of-stake x2 до августа?',
-    'Удвоится ли количество валидаторов Ethereum до 1 августа 2025?',
-    'crypto', 450, 890, 10, 'active', false, 'manual', ['eth', 'ethereum']),
-
-  makeBet('b4', 'Реал Мадрид выиграет Лигу Чемпионов 2025?',
-    'Станет ли ФК Реал Мадрид победителем ЛЧ сезона 2024/25?',
-    'sports', 2100, 1800, 30, 'active', false, 'manual', ['football', 'ucl', 'real']),
-
-  makeBet('b5', 'Трамп подпишет новый крипто-закон до сентября 2025?',
-    'Подпишет ли президент США новый законопроект о регулировании криптовалют до 1 сентября?',
-    'politics', 980, 1420, 55, 'active', true, 'manual', ['usa', 'trump', 'crypto-law']),
-
-  makeBet('b6', 'Mbappe забьёт 30+ голов в сезоне Ла Лига?',
-    'Забьёт ли Килиан Мбаппе 30 или больше голов в текущем сезоне Ла Лиги?',
-    'sports', 670, 430, 25, 'active', false, 'manual', ['football', 'mbappe', 'laliga']),
-
-  makeBet('b7', 'Цена TON превысит $10 до конца 2025?',
-    'Достигнет ли цена Toncoin отметки $10 USD до 31 декабря 2025 года?',
-    'crypto', 5400, 2200, 90, 'active', true, 'price', ['ton', 'price']),
-
-  makeBet('b8', 'Apple выпустит AR-очки в 2025 году?',
-    'Выпустит ли Apple новые AR/VR очки до конца 2025 года?',
-    'news', 340, 780, 120, 'active', false, 'manual', ['apple', 'ar', 'tech']),
-
-  makeBet('b9', 'Золото превысит $3500 за унцию?',
-    'Достигнет ли цена золота $3500 за унцию в 2025 году?',
-    'crypto', 1200, 900, 60, 'active', false, 'price', ['gold', 'commodities']),
-
-  makeBet('b10', 'Сборная России выйдет на ЧМ 2026?',
-    'Квалифицируется ли сборная России по футболу на Чемпионат Мира 2026?',
-    'sports', 120, 890, 200, 'active', false, 'manual', ['football', 'russia', 'wc2026']),
-];
-
-// ─── Default User ──────────────────────────────────────────────────────────────
-const makeDefaultUser = (): User => ({
-  id: `user_${Date.now()}`,
-  telegramId: 0,
-  username: 'Player',
-  firstName: 'TON',
-  lastName: 'Bettor',
-  avatar: '🎯',
-  tonBalance: 0,
-  totalWagered: 0,
-  totalWon: 0,
-  totalLost: 0,
-  reputation: 100,
-  activeBets: [],
-  resolvedBets: [],
-  votedBets: [],
-  referralCode: `FB_${Math.random().toString(36).slice(2, 8).toUpperCase()}`,
-  referrals: [],
-  referralEarnings: 0,
-  joinedAt: Date.now(),
-  lastActive: Date.now(),
-  isAdmin: false,
-  notifications: [],
-  tonDomains: [],
-  profilePublic: true,
-  winStreak: 0,
-  maxWinStreak: 0,
-  rank: 'novice',
-});
-
-// ─── Store ─────────────────────────────────────────────────────────────────────
 interface StoreState {
-  // Navigation
-  activeTab: 'bets' | 'create' | 'portfolio' | 'admin' | 'profile';
-  setActiveTab: (tab: StoreState['activeTab']) => void;
+  activeTab: Tab;
+  setActiveTab: (tab: Tab) => void;
   selectedBetId: string | null;
   setSelectedBetId: (id: string | null) => void;
   viewingUserId: string | null;
   setViewingUserId: (id: string | null) => void;
 
-  // Data
-  bets: Bet[];
-  currentUser: User;
-  setCurrentUser: (u: User) => void;
   tonWalletAddress: string | null;
   setTonWalletAddress: (addr: string | null) => void;
+  currentUser: User | null;
+  setCurrentUser: (u: User | null) => void;
 
-  // Filters
+  isAdmin: boolean;
+  setIsAdmin: (v: boolean) => void;
+
+  bets: Bet[];
+  users: User[];
+
   filterCategory: BetCategory | 'all';
   setFilterCategory: (c: BetCategory | 'all') => void;
   searchQuery: string;
   setSearchQuery: (q: string) => void;
 
-  // Metrics
-  financialMetrics: FinancialMetrics;
-  updateFinancialMetrics: () => void;
+  createBet: (params: {
+    title: string; description: string; category: BetCategory;
+    resolveAt: number; oracleType: OracleType; oracleSymbol?: string;
+    oracleTarget?: number; oracleDirection?: 'above' | 'below'; tags: string[];
+  }) => { ok: boolean; error?: string };
 
-  // Actions
-  recordBet: (betId: string, side: 'yes' | 'no', amount: number, txHash: string, expectedPrice: number) => { ok: boolean; error?: string };
+  placeBet: (betId: string, side: 'yes' | 'no', amount: number, txHash: string) => { ok: boolean; error?: string; filledPrice?: number };
+
+  addPosVote: (betId: string, choice: 'yes' | 'no', stake: number, confidence: number) => { ok: boolean; error?: string };
+
   addComment: (betId: string, text: string) => void;
-  voteOnBet: (betId: string, choice: 'yes' | 'no', stake: number) => { ok: boolean; error?: string };
-  resolveBet: (betId: string, outcome: 'yes' | 'no') => void;
-  createBet: (data: Partial<Bet>) => { ok: boolean; betId?: string; error?: string };
-  approveBet: (betId: string) => void;
-  featureBet: (betId: string, featured: boolean) => void;
-  cancelBet: (betId: string) => void;
-  linkTonDomain: (domain: string) => { ok: boolean; error?: string };
-  unlinkTonDomain: (domain: string) => void;
-  // TON domains from wallet NFTs
-  loadDomainsFromWallet: (walletAddr: string) => Promise<void>;
+
+  updateFinancialMetrics: () => void;
 }
 
-export const useStore = create<StoreState>()(
-  persist(
-    (set, get) => ({
-      activeTab: 'bets',
-      setActiveTab: (tab) => set({ activeTab: tab }),
-      selectedBetId: null,
-      setSelectedBetId: (id) => set({ selectedBetId: id }),
-      viewingUserId: null,
-      setViewingUserId: (id) => set({ viewingUserId: id }),
+const LS_KEY = 'betton_v4';
+function loadState(): Partial<{ bets: Bet[]; users: User[]; tonWalletAddress: string | null; currentUser: User | null; isAdmin: boolean }> {
+  try { const raw = localStorage.getItem(LS_KEY); return raw ? JSON.parse(raw) : {}; } catch { return {}; }
+}
+function saveToLS(data: { bets: Bet[]; users: User[]; tonWalletAddress: string | null; currentUser: User | null; isAdmin: boolean }) {
+  try { localStorage.setItem(LS_KEY, JSON.stringify(data)); } catch {}
+}
 
-      bets: INITIAL_BETS,
-      currentUser: makeDefaultUser(),
-      setCurrentUser: (u) => set({ currentUser: u }),
-      tonWalletAddress: null,
-      setTonWalletAddress: (addr) => set({ tonWalletAddress: addr }),
+const saved = loadState();
 
-      filterCategory: 'all',
-      setFilterCategory: (c) => set({ filterCategory: c }),
-      searchQuery: '',
-      setSearchQuery: (q) => set({ searchQuery: q }),
+export const useStore = create<StoreState>((set, get) => ({
+  activeTab: 'bets',
+  setActiveTab: (tab) => set({ activeTab: tab, selectedBetId: null }),
+  selectedBetId: null,
+  setSelectedBetId: (id) => set({ selectedBetId: id }),
+  viewingUserId: null,
+  setViewingUserId: (id) => set({ viewingUserId: id }),
 
-      financialMetrics: {
-        totalVolume: 0, totalFees: 0, totalPayouts: 0,
-        activeBetsCount: 0, resolvedBetsCount: 0, platformRevenue: 0,
-        avgBetSize: 0, dailyVolume: 0, weeklyVolume: 0,
-      },
-
-      updateFinancialMetrics: () => {
-        const { bets } = get();
-        const active = bets.filter(b => b.status === 'active');
-        const resolved = bets.filter(b => b.status === 'resolved');
-        const allParticipants = bets.flatMap(b => b.participants);
-        const totalVol = allParticipants.reduce((s, p) => s + p.amount, 0);
-        const fees = totalVol * PLATFORM_FEE_PCT;
-        const now = Date.now();
-        const dayAgo = now - 86400000;
-        const weekAgo = now - 604800000;
-        const daily = allParticipants.filter(p => p.timestamp > dayAgo).reduce((s, p) => s + p.amount, 0);
-        const weekly = allParticipants.filter(p => p.timestamp > weekAgo).reduce((s, p) => s + p.amount, 0);
-        set({
-          financialMetrics: {
-            totalVolume: totalVol,
-            totalFees: fees,
-            totalPayouts: 0,
-            activeBetsCount: active.length,
-            resolvedBetsCount: resolved.length,
-            platformRevenue: fees,
-            avgBetSize: allParticipants.length ? totalVol / allParticipants.length : 0,
-            dailyVolume: daily,
-            weeklyVolume: weekly,
-          },
-        });
-      },
-
-      recordBet: (betId, side, amount, txHash, expectedPrice) => {
-        const { bets, currentUser } = get();
-        const bet = bets.find(b => b.id === betId);
-        if (!bet) return { ok: false, error: 'Ставка не найдена' };
-        if (bet.status !== 'active') return { ok: false, error: 'Ставка не активна' };
-        if (amount < MIN_BET_TON) return { ok: false, error: `Минимум ${MIN_BET_TON} TON` };
-
-        const curPrice = side === 'yes' ? bet.yesPrice : bet.noPrice;
-        const slippage = Math.abs(curPrice - expectedPrice) / expectedPrice;
-        if (slippage > bet.maxSlippagePct) return { ok: false, error: 'Слишком большой slippage' };
-
-        const newYesPool = side === 'yes' ? bet.yesPool + amount : bet.yesPool;
-        const newNoPool = side === 'no' ? bet.noPool + amount : bet.noPool;
-        const prices = calcAmmPrice(newYesPool, newNoPool);
-        const shares = calcShares(amount, side === 'yes' ? bet.yesPool : bet.noPool, side === 'yes' ? bet.noPool : bet.yesPool);
-
-        const userBet: UserBet = {
-          betId, userId: currentUser.id, walletAddress: currentUser.walletAddress || 'demo',
-          username: currentUser.username, side, amount, shares,
-          timestamp: Date.now(), avgPrice: curPrice, txHash, confirmed: true,
-        };
-
-        const newPricePoint: PricePoint = {
-          time: Date.now(), yesPrice: prices.yes, noPrice: prices.no, volume: amount,
-        };
-
-        const updatedBet: Bet = {
-          ...bet,
-          yesPool: newYesPool, noPool: newNoPool,
-          totalVolume: bet.totalVolume + amount,
-          yesPrice: prices.yes, noPrice: prices.no,
-          participants: [...bet.participants, userBet],
-          priceHistory: [...bet.priceHistory, newPricePoint],
-        };
-
-        set({
-          bets: bets.map(b => b.id === betId ? updatedBet : b),
-          currentUser: {
-            ...currentUser,
-            totalWagered: currentUser.totalWagered + amount,
-            activeBets: [...currentUser.activeBets, betId],
-          },
-        });
-        get().updateFinancialMetrics();
-        return { ok: true };
-      },
-
-      addComment: (betId, text) => {
-        const { bets, currentUser } = get();
-        const comment: Comment = {
-          id: `c_${Date.now()}`,
-          userId: currentUser.id, username: currentUser.username,
-          avatar: currentUser.avatar, text: text.slice(0, 500),
-          timestamp: Date.now(), likes: 0,
-        };
-        set({ bets: bets.map(b => b.id === betId ? { ...b, comments: [...b.comments, comment] } : b) });
-      },
-
-      voteOnBet: (betId, choice, stake) => {
-        const { bets, currentUser } = get();
-        const bet = bets.find(b => b.id === betId);
-        if (!bet) return { ok: false, error: 'Не найдено' };
-        if (currentUser.votedBets.includes(betId)) return { ok: false, error: 'Уже проголосовал' };
-        if (bet.status !== 'voting') return { ok: false, error: 'Голосование не активно' };
-
-        const vote: Vote = {
-          id: `v_${Date.now()}`, userId: currentUser.id,
-          walletAddress: currentUser.walletAddress || '', choice, stake,
-          timestamp: Date.now(), weight: stake,
-        };
-        set({
-          bets: bets.map(b => b.id === betId ? { ...b, votes: [...b.votes, vote] } : b),
-          currentUser: { ...currentUser, votedBets: [...currentUser.votedBets, betId] },
-        });
-        return { ok: true };
-      },
-
-      resolveBet: (betId, outcome) => {
-        const { bets } = get();
-        set({
-          bets: bets.map(b => b.id === betId
-            ? { ...b, status: 'resolved', outcome, resolveAt: Date.now() }
-            : b
-          ),
-        });
-        get().updateFinancialMetrics();
-      },
-
-      createBet: (data) => {
-        const { bets, currentUser } = get();
-        const id = `bet_${Date.now()}`;
-        const now = Date.now();
-        const newBet: Bet = {
-          id,
-          title: data.title || 'Новая ставка',
-          description: data.description || '',
-          category: data.category || 'custom',
-          creatorId: currentUser.id,
-          creatorUsername: currentUser.username,
-          createdAt: now,
-          resolveAt: data.resolveAt || now + 7 * 86400000,
-          status: 'pending',
-          outcome: null,
-          yesPool: 0, noPool: 0, totalVolume: 0,
-          yesPrice: 0.5, noPrice: 0.5,
-          participants: [], votes: [], comments: [],
-          priceHistory: [{ time: now, yesPrice: 0.5, noPrice: 0.5, volume: 0 }],
-          oracleType: data.oracleType || 'manual',
-          oracleSymbol: data.oracleSymbol,
-          oracleTarget: data.oracleTarget,
-          oracleDirection: data.oracleDirection,
-          adminApproved: false,
-          featured: false,
-          tags: data.tags || [],
-          feePercent: PLATFORM_FEE_PCT,
-          treasuryWallet: TREASURY_WALLET,
-          minBetTon: MIN_BET_TON,
-          maxSlippagePct: 0.05,
-        };
-        set({ bets: [newBet, ...bets] });
-        return { ok: true, betId: id };
-      },
-
-      approveBet: (betId) => {
-        const { bets } = get();
-        set({
-          bets: bets.map(b => b.id === betId ? { ...b, adminApproved: true, status: 'active' } : b),
-        });
-      },
-
-      featureBet: (betId, featured) => {
-        const { bets } = get();
-        set({ bets: bets.map(b => b.id === betId ? { ...b, featured } : b) });
-      },
-
-      cancelBet: (betId) => {
-        const { bets } = get();
-        set({ bets: bets.map(b => b.id === betId ? { ...b, status: 'cancelled' } : b) });
-      },
-
-      linkTonDomain: (domain) => {
-        const { currentUser } = get();
-        const d = domain.trim().toLowerCase();
-        if (!d.endsWith('.ton')) return { ok: false, error: 'Домен должен заканчиваться на .ton' };
-        if (currentUser.tonDomains.find(x => x.domain === d)) return { ok: false, error: 'Уже привязан' };
-        const newDomain: TonDomain = { domain: d, verified: false, linkedAt: Date.now() };
-        set({ currentUser: { ...currentUser, tonDomains: [...currentUser.tonDomains, newDomain] } });
-        return { ok: true };
-      },
-
-      unlinkTonDomain: (domain) => {
-        const { currentUser } = get();
-        set({ currentUser: { ...currentUser, tonDomains: currentUser.tonDomains.filter(d => d.domain !== domain) } });
-      },
-
-      // Real TON DNS NFT lookup
-      loadDomainsFromWallet: async (walletAddr: string) => {
-        try {
-          // Query TON API for NFT items in this wallet that are .ton domains
-          const resp = await fetch(`https://tonapi.io/v2/accounts/${walletAddr}/nfts?collection=0:b774d95eb20543f186c06b371ab88ad704f7e256130caf96189368a7d0cb6ccf&limit=20`);
-          if (!resp.ok) return;
-          const data = await resp.json();
-          const { currentUser } = get();
-          const domains: TonDomain[] = (data.nft_items || []).map((item: any) => {
-            const name = item.metadata?.name || item.dns || '';
-            return {
-              domain: name.endsWith('.ton') ? name : `${name}.ton`,
-              verified: true,
-              linkedAt: Date.now(),
-            };
-          }).filter((d: TonDomain) => d.domain.endsWith('.ton'));
-
-          if (domains.length > 0) {
-            set({
-              currentUser: {
-                ...currentUser,
-                tonDomains: domains,
-              },
-            });
-          }
-        } catch {
-          // silently fail
-        }
-      },
-    }),
-    {
-      name: 'flashbet-store-v3',
-      partialize: (state) => ({
-        currentUser: { ...state.currentUser, isAdmin: false },
-        bets: state.bets,
-        activeTab: state.activeTab,
-        filterCategory: state.filterCategory,
-        tonWalletAddress: state.tonWalletAddress,
-      }),
+  tonWalletAddress: saved.tonWalletAddress ?? null,
+  setTonWalletAddress: (addr) => {
+    const state = get();
+    if (!addr) {
+      const next = { ...state, tonWalletAddress: null, currentUser: null };
+      set({ tonWalletAddress: null, currentUser: null });
+      saveToLS({ bets: next.bets, users: next.users, tonWalletAddress: null, currentUser: null, isAdmin: next.isAdmin });
+      return;
     }
-  )
-);
+    let user = state.users.find(u => u.walletAddress === addr) ?? null;
+    if (!user) {
+      user = {
+        id: generateId(), walletAddress: addr, username: walletToUsername(addr),
+        joinedAt: Date.now(), reputation: 100, stakedAmount: 0, stakeAge: 0,
+        totalBets: 0, wins: 0, losses: 0, totalVolume: 0, pnl: 0,
+        referralCode: Math.random().toString(36).slice(2, 8).toUpperCase(),
+        avatarEmoji: ['🦊','🐺','🦁','🐯','🦋','🐲','🦄','🐸'][Math.floor(Math.random()*8)],
+        badges: ['🔰'], posVotingPower: 0, isAdmin: false,
+      };
+      const newUsers = [...state.users, user];
+      set({ tonWalletAddress: addr, currentUser: user, users: newUsers });
+      saveToLS({ bets: state.bets, users: newUsers, tonWalletAddress: addr, currentUser: user, isAdmin: state.isAdmin });
+    } else {
+      set({ tonWalletAddress: addr, currentUser: user });
+      saveToLS({ bets: state.bets, users: state.users, tonWalletAddress: addr, currentUser: user, isAdmin: state.isAdmin });
+    }
+  },
+  currentUser: saved.currentUser ?? null,
+  setCurrentUser: (u) => {
+    set({ currentUser: u });
+    const s = get();
+    saveToLS({ bets: s.bets, users: s.users, tonWalletAddress: s.tonWalletAddress, currentUser: u, isAdmin: s.isAdmin });
+  },
+
+  isAdmin: saved.isAdmin ?? false,
+  setIsAdmin: (v) => {
+    set({ isAdmin: v });
+    const s = get();
+    saveToLS({ bets: s.bets, users: s.users, tonWalletAddress: s.tonWalletAddress, currentUser: s.currentUser, isAdmin: v });
+  },
+
+  bets: saved.bets ?? makeEmptyBets(),
+  users: saved.users ?? [],
+  filterCategory: 'all',
+  setFilterCategory: (c) => set({ filterCategory: c }),
+  searchQuery: '',
+  setSearchQuery: (q) => set({ searchQuery: q }),
+
+  // ─── CREATE BET ────────────────────────────────────────────────────────────
+  createBet: (params) => {
+    const { currentUser, bets } = get();
+    if (!currentUser) return { ok: false, error: 'Подключите TON кошелёк' };
+    if (!params.title.trim() || params.title.length < 5) return { ok: false, error: 'Введите название (мин. 5 символов)' };
+    if (!params.resolveAt || params.resolveAt <= Date.now()) return { ok: false, error: 'Выберите корректную дату' };
+    if (params.oracleType === 'price' && !params.oracleSymbol) return { ok: false, error: 'Укажите торговый символ' };
+
+    const yp = 0.5;
+    const { yesOrders, noOrders } = buildOrderbook(yp, 0);
+    const newBet: Bet = {
+      id: generateId(),
+      title: params.title.trim(),
+      description: params.description.trim(),
+      category: params.category,
+      creatorId: currentUser.id,
+      creatorUsername: currentUser.username,
+      createdAt: Date.now(),
+      resolveAt: params.resolveAt,
+      status: 'active',
+      oracleType: params.oracleType,
+      oracleSymbol: params.oracleSymbol,
+      oracleTarget: params.oracleTarget,
+      oracleDirection: params.oracleDirection,
+      yesPrice: yp, noPrice: 1 - yp,
+      totalVolume: 0, yesVolume: 0, noVolume: 0,
+      participants: [], comments: [],
+      priceHistory: [{ time: Date.now(), yesPrice: yp, noPrice: 1 - yp }],
+      posVotes: [], tags: params.tags, featured: false,
+      yesOrders, noOrders,
+    };
+    const newBets = [newBet, ...bets];
+    set({ bets: newBets });
+    const s = get();
+    saveToLS({ bets: newBets, users: s.users, tonWalletAddress: s.tonWalletAddress, currentUser: s.currentUser, isAdmin: s.isAdmin });
+    return { ok: true };
+  },
+
+  // ─── PLACE BET (AMM) ───────────────────────────────────────────────────────
+  placeBet: (betId, side, amount, txHash) => {
+    const { currentUser, bets } = get();
+    if (!currentUser) return { ok: false, error: 'Подключите TON кошелёк' };
+    if (amount < 0.05) return { ok: false, error: 'Минимальная ставка 0.05 TON' };
+    if (amount > 10000) return { ok: false, error: 'Максимальная ставка 10,000 TON' };
+
+    const betIdx = bets.findIndex(b => b.id === betId);
+    if (betIdx === -1) return { ok: false, error: 'Событие не найдено' };
+    const bet = bets[betIdx];
+    if (bet.status !== 'active') return { ok: false, error: 'Ставки закрыты' };
+
+    const before = side === 'yes' ? bet.yesPrice : bet.noPrice;
+    const { yesPrice, noPrice, yesVol, noVol } = updateAmmPrice(bet.yesVolume, bet.noVolume, side, amount);
+
+    const participant: Participant = {
+      userId: currentUser.id, username: currentUser.username,
+      side, amount, txHash, time: Date.now(),
+      expectedPrice: before,
+      filledPrice: side === 'yes' ? yesPrice : noPrice,
+    };
+
+    const newHistory = [...bet.priceHistory, { time: Date.now(), yesPrice, noPrice }];
+    const { yesOrders, noOrders } = buildOrderbook(yesPrice, yesVol + noVol);
+
+    const updatedBet: Bet = {
+      ...bet, yesPrice, noPrice,
+      yesVolume: yesVol, noVolume: noVol,
+      totalVolume: bet.totalVolume + amount,
+      participants: [...bet.participants, participant],
+      priceHistory: newHistory, yesOrders, noOrders,
+    };
+
+    const newBets = [...bets];
+    newBets[betIdx] = updatedBet;
+
+    const { users } = get();
+    const updatedUser: User = { ...currentUser, totalBets: currentUser.totalBets + 1, totalVolume: currentUser.totalVolume + amount };
+    const newUsers = users.some(u => u.id === currentUser.id)
+      ? users.map(u => u.id === currentUser.id ? updatedUser : u)
+      : [...users, updatedUser];
+
+    set({ bets: newBets, users: newUsers, currentUser: updatedUser });
+    const s = get();
+    saveToLS({ bets: newBets, users: newUsers, tonWalletAddress: s.tonWalletAddress, currentUser: updatedUser, isAdmin: s.isAdmin });
+    return { ok: true, filledPrice: participant.filledPrice };
+  },
+
+  // ─── PROOF OF STAKE VOTE ───────────────────────────────────────────────────
+  addPosVote: (betId, choice, stake, confidence) => {
+    const { currentUser, bets } = get();
+    if (!currentUser) return { ok: false, error: 'Подключите TON кошелёк' };
+    if (stake < 0.1) return { ok: false, error: 'Минимальный стейк 0.1 TON' };
+
+    const betIdx = bets.findIndex(b => b.id === betId);
+    if (betIdx === -1) return { ok: false, error: 'Событие не найдено' };
+    const bet = bets[betIdx];
+    if (bet.status === 'resolved' || bet.status === 'cancelled') return { ok: false, error: 'Голосование завершено' };
+    if (bet.posVotes.some(v => v.userId === currentUser.id)) return { ok: false, error: 'Вы уже проголосовали' };
+
+    const txHash = Array.from({ length: 16 }, () => Math.floor(Math.random()*16).toString(16)).join('');
+    const vote: PosVote = {
+      userId: currentUser.id, username: currentUser.username,
+      walletAddress: currentUser.walletAddress,
+      choice, stake, reputation: currentUser.reputation,
+      timestamp: Date.now(), txHash,
+      stakeAge: currentUser.stakeAge, confidence,
+    };
+
+    const newVotes = [...bet.posVotes, vote];
+    const weightedVotes: WeightedVote[] = newVotes.map(v => ({
+      userId: v.userId, username: v.username, choice: v.choice,
+      stake: v.stake, reputation: v.reputation, timestamp: v.timestamp,
+      txHash: v.txHash, stakeAge: v.stakeAge, confidence: v.confidence,
+    }));
+    const posResult = computePosResult(weightedVotes);
+
+    let newStatus: BetStatus = bet.status;
+    let resolvedOutcome: 'yes' | 'no' | undefined;
+
+    if (posResult.supermajority && posResult.validatorCount >= 3 && posResult.outcome !== 'inconclusive') {
+      newStatus = 'resolved';
+      resolvedOutcome = posResult.outcome as 'yes' | 'no';
+    } else if (newVotes.length >= 2 && bet.status === 'active') {
+      newStatus = 'voting';
+    }
+
+    let updatedBet: Bet = { ...bet, posVotes: newVotes, status: newStatus };
+    if (resolvedOutcome) {
+      updatedBet = { ...updatedBet, resolved: true, resolvedOutcome };
+    }
+
+    let newBets = [...bets];
+    newBets[betIdx] = updatedBet;
+
+    // If resolved — compute PnL
+    if (newStatus === 'resolved' && resolvedOutcome) {
+      const outcome = resolvedOutcome;
+      newBets = newBets.map(b => {
+        if (b.id !== betId) return b;
+        const winVolume = outcome === 'yes' ? b.yesVolume : b.noVolume;
+        const totalPool = b.totalVolume;
+        const updatedPart = b.participants.map(p => {
+          if (p.side === outcome && winVolume > 0) {
+            const payout = (p.amount / winVolume) * totalPool * 0.95;
+            return { ...p, pnl: payout - p.amount };
+          }
+          return { ...p, pnl: -p.amount };
+        });
+        return { ...b, participants: updatedPart };
+      });
+    }
+
+    const { users } = get();
+    const updatedUser: User = {
+      ...currentUser,
+      stakedAmount: currentUser.stakedAmount + stake,
+      posVotingPower: Math.sqrt(currentUser.stakedAmount + stake) * Math.sqrt(currentUser.reputation),
+    };
+    const newUsers = users.some(u => u.id === currentUser.id)
+      ? users.map(u => u.id === currentUser.id ? updatedUser : u)
+      : [...users, updatedUser];
+
+    set({ bets: newBets, users: newUsers, currentUser: updatedUser });
+    const s = get();
+    saveToLS({ bets: newBets, users: newUsers, tonWalletAddress: s.tonWalletAddress, currentUser: updatedUser, isAdmin: s.isAdmin });
+    return { ok: true };
+  },
+
+  // ─── ADD COMMENT ───────────────────────────────────────────────────────────
+  addComment: (betId, text) => {
+    const { currentUser, bets } = get();
+    if (!currentUser || !text.trim()) return;
+    const betIdx = bets.findIndex(b => b.id === betId);
+    if (betIdx === -1) return;
+    const comment: Comment = {
+      id: generateId(), userId: currentUser.id, username: currentUser.username,
+      text: text.trim(), time: Date.now(), likes: 0,
+    };
+    const newBets = [...bets];
+    newBets[betIdx] = { ...bets[betIdx], comments: [...bets[betIdx].comments, comment] };
+    set({ bets: newBets });
+    const s = get();
+    saveToLS({ bets: newBets, users: s.users, tonWalletAddress: s.tonWalletAddress, currentUser: s.currentUser, isAdmin: s.isAdmin });
+  },
+
+  // ─── METRICS ───────────────────────────────────────────────────────────────
+  updateFinancialMetrics: () => {
+    const { bets, users, currentUser } = get();
+    if (!currentUser) return;
+    const myBets = bets.flatMap(b => b.participants.filter(p => p.userId === currentUser.id));
+    const pnl = myBets.reduce((s, p) => s + (p.pnl ?? 0), 0);
+    const wins = myBets.filter(p => (p.pnl ?? 0) > 0).length;
+    const losses = myBets.filter(p => (p.pnl ?? 0) < 0).length;
+    const updatedUser: User = { ...currentUser, pnl, wins, losses, totalBets: myBets.length };
+    const newUsers = users.map(u => u.id === currentUser.id ? updatedUser : u);
+    set({ currentUser: updatedUser, users: newUsers });
+    const s = get();
+    saveToLS({ bets: s.bets, users: newUsers, tonWalletAddress: s.tonWalletAddress, currentUser: updatedUser, isAdmin: s.isAdmin });
+  },
+}));

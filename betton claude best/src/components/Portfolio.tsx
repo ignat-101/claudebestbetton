@@ -2,193 +2,201 @@ import { useStore } from '../store/useStore';
 import { formatDistanceToNow } from 'date-fns';
 import { ru } from 'date-fns/locale';
 
-const PLATFORM_FEE = 0.02;
-
 export function Portfolio() {
   const { bets, currentUser, setSelectedBetId, setActiveTab, tonWalletAddress } = useStore();
 
-  const myBets = bets.filter(b =>
-    b.participants.some(p => p.userId === currentUser.id)
-  );
-
-  const activeBets = myBets.filter(b => b.status === 'active');
-  const resolvedBets = myBets.filter(b => b.status === 'resolved' || b.status === 'cancelled');
-
-  // Calculate stats from real bets
-  const totalWagered = currentUser.totalWagered;
-  const totalWon = currentUser.totalWon;
-  const pnl = totalWon - totalWagered;
-  const roi = totalWagered > 0 ? ((pnl / totalWagered) * 100).toFixed(1) : '0.0';
-  const roiPos = parseFloat(roi) >= 0;
-
-  // Active positions with current unrealized value
-  const activePositions = activeBets.map(bet => {
-    const myParticipations = bet.participants.filter(p => p.userId === currentUser.id);
-    const invested = myParticipations.reduce((s, p) => s + p.amount, 0);
-    const side = myParticipations[0]?.side;
-    const currentProb = side === 'yes' ? bet.yesPrice : bet.noPrice;
-    const shares = myParticipations.reduce((s, p) => s + p.shares, 0);
-    const currentValue = shares * currentProb * (1 - PLATFORM_FEE);
-    return { bet, invested, currentValue, side, shares };
-  });
-
-  const unrealizedPnl = activePositions.reduce((s, p) => s + (p.currentValue - p.invested), 0);
-
-  if (!tonWalletAddress && myBets.length === 0) {
+  if (!tonWalletAddress || !currentUser) {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100%', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-        <div style={{ fontSize: 48, marginBottom: 16 }}>💼</div>
-        <h2 style={{ color: '#f1f5f9', marginBottom: 8, fontSize: 18, textAlign: 'center' }}>Ваш портфель пуст</h2>
-        <p style={{ color: '#64748b', textAlign: 'center', fontSize: 13, marginBottom: 24 }}>
-          Подключите кошелёк и сделайте первую ставку
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100%', alignItems: 'center', justifyContent: 'center', padding: 40 }}>
+        <div style={{ fontSize: 48, marginBottom: 12 }}>💎</div>
+        <h2 style={{ color: '#f1f5f9', marginBottom: 8 }}>Нет подключения</h2>
+        <p style={{ color: '#64748b', fontSize: 13, textAlign: 'center', marginBottom: 20 }}>
+          Подключите TON кошелёк чтобы видеть свои ставки
         </p>
-        <button
-          className="btn-primary"
-          style={{ padding: '10px 24px', fontSize: 14 }}
-          onClick={() => setActiveTab('bets')}
-        >
-          Перейти к рынкам
-        </button>
       </div>
     );
   }
 
+  // Collect all my bets
+  type MyPosition = {
+    betId: string; betTitle: string; side: 'yes' | 'no';
+    amount: number; filledPrice?: number; pnl?: number; time: number;
+    betStatus: string; resolvedOutcome?: string;
+  };
+
+  const myPositions: MyPosition[] = bets.flatMap(b =>
+    b.participants
+      .filter(p => p.userId === currentUser.id)
+      .map(p => ({
+        betId: b.id, betTitle: b.title, side: p.side,
+        amount: p.amount, filledPrice: p.filledPrice, pnl: p.pnl,
+        time: p.time, betStatus: b.status, resolvedOutcome: b.resolvedOutcome,
+      }))
+  ).sort((a, b) => b.time - a.time);
+
+  const myPosVotes = bets.flatMap(b =>
+    b.posVotes.filter(v => v.userId === currentUser.id).map(v => ({
+      betId: b.id, betTitle: b.title,
+      choice: v.choice, stake: v.stake, timestamp: v.timestamp,
+      betStatus: b.status, resolvedOutcome: b.resolvedOutcome,
+    }))
+  ).sort((a, b) => b.timestamp - a.timestamp);
+
+  const totalInvested = myPositions.reduce((s, p) => s + p.amount, 0);
+  const totalPnl = myPositions.reduce((s, p) => s + (p.pnl ?? 0), 0);
+  const activePositions = myPositions.filter(p => p.betStatus === 'active' || p.betStatus === 'voting');
+  const resolvedPositions = myPositions.filter(p => p.betStatus === 'resolved');
+  const wins = resolvedPositions.filter(p => (p.pnl ?? 0) > 0).length;
+  const losses = resolvedPositions.filter(p => (p.pnl ?? 0) < 0).length;
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {/* Header */}
       <div style={{ padding: '16px 16px 12px', flexShrink: 0 }}>
-        <h1 style={{ fontSize: 18, fontWeight: 800, color: '#f1f5f9', margin: 0 }}>Портфель</h1>
+        <h1 style={{ fontSize: 18, fontWeight: 800, color: '#f1f5f9', margin: '0 0 12px' }}>Портфолио</h1>
+
+        {/* Stats grid */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8, marginBottom: 4 }}>
+          <div className="glass-card" style={{ padding: '12px 14px' }}>
+            <div style={{ fontSize: 11, color: '#64748b', marginBottom: 4 }}>Всего вложено</div>
+            <div style={{ fontSize: 18, fontWeight: 800, color: '#f1f5f9' }}>{totalInvested.toFixed(2)}</div>
+            <div style={{ fontSize: 10, color: '#64748b' }}>TON</div>
+          </div>
+          <div className="glass-card" style={{ padding: '12px 14px' }}>
+            <div style={{ fontSize: 11, color: '#64748b', marginBottom: 4 }}>Прибыль / Убыток</div>
+            <div style={{ fontSize: 18, fontWeight: 800, color: totalPnl >= 0 ? '#22c55e' : '#ef4444' }}>
+              {totalPnl >= 0 ? '+' : ''}{totalPnl.toFixed(2)}
+            </div>
+            <div style={{ fontSize: 10, color: '#64748b' }}>TON</div>
+          </div>
+          <div className="glass-card" style={{ padding: '12px 14px' }}>
+            <div style={{ fontSize: 11, color: '#64748b', marginBottom: 4 }}>Активных ставок</div>
+            <div style={{ fontSize: 18, fontWeight: 800, color: '#3b82f6' }}>{activePositions.length}</div>
+          </div>
+          <div className="glass-card" style={{ padding: '12px 14px' }}>
+            <div style={{ fontSize: 11, color: '#64748b', marginBottom: 4 }}>Побед / Поражений</div>
+            <div style={{ fontSize: 18, fontWeight: 800 }}>
+              <span style={{ color: '#22c55e' }}>{wins}</span>
+              <span style={{ color: '#64748b', fontSize: 14 }}> / </span>
+              <span style={{ color: '#ef4444' }}>{losses}</span>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div className="scroll-area" style={{ flex: 1, padding: '0 16px 16px' }}>
-        {/* Stats */}
-        <div className="glass-card" style={{ padding: 16, marginBottom: 12 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, textAlign: 'center' }}>
-            <div>
-              <div className="stat-value">{totalWagered.toFixed(1)}</div>
-              <div className="stat-label">TON вложено</div>
-            </div>
-            <div>
-              <div className="stat-value" style={{ color: roiPos ? '#22c55e' : '#ef4444' }}>
-                {roiPos ? '+' : ''}{roi}%
-              </div>
-              <div className="stat-label">ROI</div>
-            </div>
-            <div>
-              <div className="stat-value">{myBets.length}</div>
-              <div className="stat-label">Ставок</div>
-            </div>
-          </div>
-
-          {unrealizedPnl !== 0 && (
-            <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid rgba(255,255,255,0.05)',
-                          display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
-              <span style={{ color: '#64748b' }}>Нереализованный P&L</span>
-              <span style={{ color: unrealizedPnl >= 0 ? '#22c55e' : '#ef4444', fontWeight: 700 }}>
-                {unrealizedPnl >= 0 ? '+' : ''}{unrealizedPnl.toFixed(2)} TON
-              </span>
-            </div>
-          )}
-        </div>
-
         {/* Active positions */}
         {activePositions.length > 0 && (
-          <div style={{ marginBottom: 12 }}>
+          <div style={{ marginBottom: 16 }}>
             <div className="section-label" style={{ marginBottom: 8 }}>Активные позиции</div>
-            {activePositions.map(({ bet, invested, currentValue, side }) => {
-              const yesPct = Math.round(bet.yesPrice * 100);
-              const pnlItem = currentValue - invested;
-              return (
-                <div key={bet.id} className="market-card" style={{ padding: '12px 14px', marginBottom: 8 }}
-                     onClick={() => { setSelectedBetId(bet.id); setActiveTab('bets'); }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: '#f1f5f9', marginBottom: 8, lineHeight: 1.3 }}
-                       className="line-clamp-2">
-                    {bet.title}
+            {activePositions.map((p, i) => (
+              <div key={i} className="market-card" style={{ padding: 12, marginBottom: 8 }}
+                onClick={() => { setSelectedBetId(p.betId); setActiveTab('bets'); }}>
+                <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 4, lineHeight: 1.3 }}>{p.betTitle}</div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <span style={{ color: p.side === 'yes' ? '#22c55e' : '#ef4444', fontWeight: 700, fontSize: 13 }}>
+                      {p.side === 'yes' ? 'ДА' : 'НЕТ'}
+                    </span>
+                    <span style={{ color: '#64748b', fontSize: 11, marginLeft: 6 }}>по {Math.round((p.filledPrice ?? 0.5) * 100)}¢</span>
                   </div>
-
-                  <div style={{ display: 'flex', height: 4, borderRadius: 3, overflow: 'hidden', gap: 1, marginBottom: 6 }}>
-                    <div className="prob-bar-yes" style={{ width: `${yesPct}%` }} />
-                    <div className="prob-bar-no" style={{ width: `${100 - yesPct}%` }} />
-                  </div>
-
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 4, fontSize: 11 }}>
-                    <div>
-                      <div style={{ color: '#475569' }}>Позиция</div>
-                      <div style={{ color: side === 'yes' ? '#22c55e' : '#ef4444', fontWeight: 700 }}>
-                        {side === 'yes' ? 'ДА' : 'НЕТ'}
-                      </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: '#f1f5f9' }}>{p.amount.toFixed(2)} TON</div>
+                    <div style={{ fontSize: 10, color: '#475569' }}>
+                      {formatDistanceToNow(p.time, { locale: ru, addSuffix: true })}
                     </div>
-                    <div>
-                      <div style={{ color: '#475569' }}>Вложено</div>
-                      <div style={{ color: '#f1f5f9', fontWeight: 600 }}>{invested.toFixed(2)}</div>
-                    </div>
-                    <div>
-                      <div style={{ color: '#475569' }}>Тек. стоим.</div>
-                      <div style={{ color: '#f1f5f9', fontWeight: 600 }}>{currentValue.toFixed(2)}</div>
-                    </div>
-                    <div>
-                      <div style={{ color: '#475569' }}>P&L</div>
-                      <div style={{ color: pnlItem >= 0 ? '#22c55e' : '#ef4444', fontWeight: 700 }}>
-                        {pnlItem >= 0 ? '+' : ''}{pnlItem.toFixed(2)}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div style={{ marginTop: 6, fontSize: 10, color: '#475569' }}>
-                    ⏱ {formatDistanceToNow(bet.resolveAt, { locale: ru, addSuffix: true })}
                   </div>
                 </div>
-              );
-            })}
+              </div>
+            ))}
           </div>
         )}
 
-        {/* Resolved */}
-        {resolvedBets.length > 0 && (
-          <div>
-            <div className="section-label" style={{ marginBottom: 8 }}>История</div>
-            {resolvedBets.map(bet => {
-              const myP = bet.participants.filter(p => p.userId === currentUser.id);
-              const invested = myP.reduce((s, p) => s + p.amount, 0);
-              const side = myP[0]?.side;
-              const won = bet.status === 'resolved' && bet.outcome === side;
-
-              return (
-                <div key={bet.id} className="glass-card" style={{ padding: '10px 14px', marginBottom: 8,
-                                                                    display: 'flex', justifyContent: 'space-between',
-                                                                    alignItems: 'center' }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.3 }} className="line-clamp-1">
-                      {bet.title}
-                    </div>
-                    <div style={{ fontSize: 10, color: '#475569', marginTop: 2 }}>
-                      {side === 'yes' ? 'ДА' : 'НЕТ'} · {invested.toFixed(2)} TON
-                    </div>
-                  </div>
-                  <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                    {bet.status === 'resolved' ? (
-                      <span style={{ fontSize: 12, fontWeight: 700, color: won ? '#22c55e' : '#ef4444' }}>
-                        {won ? '✓ Победа' : '✗ Проигрыш'}
+        {/* Resolved positions */}
+        {resolvedPositions.length > 0 && (
+          <div style={{ marginBottom: 16 }}>
+            <div className="section-label" style={{ marginBottom: 8 }}>Завершённые</div>
+            {resolvedPositions.map((p, i) => (
+              <div key={i} className="glass-card" style={{ padding: 12, marginBottom: 8, opacity: 0.85 }}>
+                <div style={{ fontSize: 12, color: '#64748b', marginBottom: 4, lineHeight: 1.3 }}>{p.betTitle}</div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <span style={{ color: p.side === 'yes' ? '#22c55e' : '#ef4444', fontWeight: 700, fontSize: 12 }}>
+                      {p.side === 'yes' ? 'ДА' : 'НЕТ'}
+                    </span>
+                    {p.resolvedOutcome && (
+                      <span style={{ marginLeft: 6, fontSize: 11, color: p.side === p.resolvedOutcome ? '#22c55e' : '#ef4444' }}>
+                        {p.side === p.resolvedOutcome ? '✓ Выиграл' : '✗ Проиграл'}
                       </span>
-                    ) : (
-                      <span style={{ fontSize: 11, color: '#64748b' }}>Отменено</span>
                     )}
                   </div>
+                  <div style={{ textAlign: 'right' }}>
+                    {p.pnl !== undefined && (
+                      <div style={{ fontSize: 13, fontWeight: 700, color: p.pnl >= 0 ? '#22c55e' : '#ef4444' }}>
+                        {p.pnl >= 0 ? '+' : ''}{p.pnl.toFixed(2)} TON
+                      </div>
+                    )}
+                    <div style={{ fontSize: 11, color: '#64748b' }}>{p.amount.toFixed(2)} TON</div>
+                  </div>
                 </div>
-              );
-            })}
+              </div>
+            ))}
           </div>
         )}
 
-        {myBets.length === 0 && (
-          <div style={{ textAlign: 'center', padding: '40px 0', color: '#475569' }}>
+        {/* PoS votes */}
+        {myPosVotes.length > 0 && (
+          <div style={{ marginBottom: 16 }}>
+            <div className="section-label" style={{ marginBottom: 8 }}>🗳 Мои PoS голоса</div>
+            {myPosVotes.map((v, i) => (
+              <div key={i} className="glass-card" style={{ padding: 12, marginBottom: 8 }}>
+                <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 4, lineHeight: 1.3 }}>{v.betTitle}</div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+                  <span style={{ color: v.choice === 'yes' ? '#22c55e' : '#ef4444', fontWeight: 600 }}>
+                    {v.choice === 'yes' ? '✓ ДА' : '✗ НЕТ'}
+                  </span>
+                  <span style={{ color: '#a855f7' }}>{v.stake.toFixed(1)} TON стейк</span>
+                  <span style={{ color: '#475569' }}>{v.betStatus === 'resolved' ? '✓ Завершено' : '⏳ Активно'}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {myPositions.length === 0 && myPosVotes.length === 0 && (
+          <div style={{ textAlign: 'center', padding: '50px 20px', color: '#475569' }}>
             <div style={{ fontSize: 40, marginBottom: 12 }}>📊</div>
-            <p>Ставок пока нет</p>
-            <button className="btn-primary" style={{ marginTop: 12, padding: '8px 20px', fontSize: 13 }}
-                    onClick={() => setActiveTab('bets')}>
-              Найти рынок
+            <p style={{ marginBottom: 16 }}>У вас пока нет ставок</p>
+            <button className="btn-primary" style={{ padding: '8px 20px' }}
+              onClick={() => setActiveTab('bets')}>
+              Посмотреть рынки
             </button>
           </div>
         )}
+
+        {/* Referral */}
+        <div className="glass-card" style={{ padding: 14, marginBottom: 8 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: '#f1f5f9', marginBottom: 4 }}>🎁 Реферальная программа</div>
+          <div style={{ fontSize: 11, color: '#64748b', marginBottom: 8 }}>
+            Получайте 1% от ставок приглашённых + 0.5% от их рефералов
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <div style={{
+              flex: 1, background: 'rgba(255,255,255,0.04)', borderRadius: 6, padding: '6px 10px',
+              fontSize: 13, fontWeight: 700, color: '#60a5fa', border: '1px solid rgba(255,255,255,0.06)',
+              letterSpacing: '0.05em',
+            }}>
+              {currentUser.referralCode}
+            </div>
+            <button
+              className="btn-ghost"
+              style={{ padding: '6px 12px', fontSize: 12 }}
+              onClick={() => { navigator.clipboard.writeText(`https://betton.app?ref=${currentUser.referralCode}`); }}
+            >
+              📋 Копировать
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );
