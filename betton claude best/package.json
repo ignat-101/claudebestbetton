@@ -9,12 +9,14 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@ton/ton": "^16.2.4",
     "@tonconnect/ui-react": "^2.4.4",
+    "buffer": "^6.0.3",
     "clsx": "2.1.1",
     "date-fns": "^4.1.0",
+    "lucide-react": "^1.14.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
-    "recharts": "^3.8.1",
     "tailwind-merge": "3.4.0",
     "zustand": "^5.0.13"
   },
